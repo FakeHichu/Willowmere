@@ -1,0 +1,117 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #f5f0e6;
+  --foreground: #5d4037;
+  --primary: #558b2f;
+  --primary-dark: #33691e;
+  --secondary: #8d6e63;
+  --secondary-dark: #6d4c41;
+  --accent: #ffc107;
+  --muted: #d7ccc8;
+  --card: #ffffff;
+  --border: #8d6e63;
+}
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+
+  html,
+  body {
+    margin: 0;
+    padding: 0;
+    overflow-x: hidden;
+  }
+
+  body {
+    background: var(--background);
+    color: var(--foreground);
+    font-family: 'Georgia', 'Times New Roman', serif;
+    line-height: 1.6;
+  }
+}
+
+@layer utilities {
+  /* Custom scrollbar */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: #f5f0e6;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: #8d6e63;
+    border-radius: 4px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: #6d4c41;
+  }
+
+  /* Game canvas styles */
+  #game-container {
+    background: #7cb342;
+  }
+
+  #game-container canvas {
+    display: block;
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+  }
+
+  /* Animation utilities */
+  @keyframes float {
+    0%, 100% {
+      transform: translateY(0px);
+    }
+    50% {
+      transform: translateY(-10px);
+    }
+  }
+
+  @keyframes pulse-soft {
+    0%, 100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.7;
+    }
+  }
+
+  .animate-float {
+    animation: float 3s ease-in-out infinite;
+  }
+
+  .animate-pulse-soft {
+    animation: pulse-soft 2s ease-in-out infinite;
+  }
+
+  /* Button hover effects */
+  button {
+    transition: all 0.2s ease;
+  }
+
+  button:active {
+    transform: scale(0.98);
+  }
+
+  /* Focus styles for accessibility */
+  button:focus-visible,
+  a:focus-visible {
+    outline: 3px solid #558b2f;
+    outline-offset: 2px;
+  }
+
+  /* Selection color */
+  ::selection {
+    background: #c8e6c9;
+    color: #2e7d32;
+  }
+}

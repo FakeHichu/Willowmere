@@ -1,0 +1,109 @@
+// Prisma schema for Willowmere game
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Player character and persistent data
+model Player {
+  id          String   @id @default(uuid())
+  username    String   @unique
+  email       String?  @unique
+
+  // Character customization
+  skinTone    String   @default("skin_03")
+  hair        String   @default("hair_01")
+  hairColor   String   @default("#6B4226")
+  top         String   @default("top_01")
+  topColor    String   @default("#87CEEB")
+  bottom      String   @default("bottom_01")
+  bottomColor String   @default("#8B4513")
+  shoes       String   @default("shoes_01")
+  shoesColor  String   @default("#5C4033")
+  accessory   String?
+  accessoryColor String?
+
+  // Position
+  positionX   Float    @default(400)
+  positionY   Float    @default(300)
+  direction   String   @default("down")
+
+  // Progression
+  currency    Int      @default(0)
+
+  // Timestamps
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  lastOnline  DateTime @default(now())
+
+  // Relations
+  inventory   InventoryItem[]
+  quests      PlayerQuest[]
+  friendships Friendship[]  @relation("player_friendships")
+  friends     Friendship[]  @relation("friend_friendships")
+
+  @@map("players")
+}
+
+// Player inventory
+model InventoryItem {
+  id        String   @id @default(uuid())
+  playerId  String
+  itemId    String
+  quantity  Int      @default(1)
+
+  player    Player   @relation(fields: [playerId], references: [id], onDelete: Cascade)
+
+  @@unique([playerId, itemId])
+  @@map("inventory_items")
+}
+
+// Quest progress tracking
+model PlayerQuest {
+  id            String   @id @default(uuid())
+  playerId      String
+  questId       String
+  currentStepId String?
+  status        String   @default("active") // active, completed, failed
+  progress      Json     @default("{}")
+  startedAt     DateTime @default(now())
+  completedAt   DateTime?
+
+  player        Player   @relation(fields: [playerId], references: [id], onDelete: Cascade)
+
+  @@unique([playerId, questId])
+  @@map("player_quests")
+}
+
+// Player relationships/friendships
+model Friendship {
+  id          String   @id @default(uuid())
+  playerId    String
+  friendId    String
+  level       Int      @default(0)
+  status      String   @default("acquaintance") // acquaintance, friend, close_friend, best_friend
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  player      Player   @relation("player_friendships", fields: [playerId], references: [id], onDelete: Cascade)
+  friend      Player   @relation("friend_friendships", fields: [friendId], references: [id], onDelete: Cascade)
+
+  @@unique([playerId, friendId])
+  @@map("friendships")
+}
+
+// Session for multiplayer
+model GameSession {
+  id          String   @id @default(uuid())
+  playerId    String
+  token       String   @unique
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+
+  @@map("game_sessions")
+}
