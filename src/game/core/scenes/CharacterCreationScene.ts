@@ -45,7 +45,7 @@ export class CharacterCreationScene extends Phaser.Scene {
 
   private createCharacterPreview() {
     // Preview container
-    const previewBg = this.add.rectangle(200, 350, 200, 300, '#e8e0d0');
+    const previewBg = this.add.rectangle(200, 350, 200, 300, 0xe8e0d0);
     previewBg.setStrokeStyle(2, 0x8d6e63);
 
     // Character preview sprite

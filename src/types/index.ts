@@ -148,6 +148,7 @@ export interface QuestStep {
   id: string;
   type: 'talk' | 'collect' | 'deliver' | 'explore' | 'interact' | 'reach';
   targetId: string;
+  itemId?: string;
   targetPosition?: Vector2;
   quantity?: number;
   description: string;

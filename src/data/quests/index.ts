@@ -52,7 +52,7 @@ export const quests: QuestDefinition[] = [
         id: 'step_deliver_arthur',
         type: 'deliver',
         targetId: 'npc_arthur',
-        targetId: 'item_bread_loaf',
+        itemId: 'item_bread_loaf',
         description: 'Deliver the bread to Arthur',
         nextStepId: null
       }
