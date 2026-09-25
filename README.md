@@ -40,18 +40,35 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 ## Project Structure
 
 ```
-src/
-├── app/                    # Next.js App Router pages
+├── app/                    # Next.js App Router pages (root for Next.js)
 │   ├── page.tsx           # Landing page
 │   ├── create/            # Character creation
 │   └── play/              # Main game
-├── components/            # React components
+├── frontend/              # Frontend React components & utilities
+│   ├── components/        # React components
+│   │   ├── CharacterCreator.tsx
+│   │   ├── DialogueUI.tsx
+│   │   └── GameCanvas.tsx
+│   ├── lib/               # Frontend utilities (deprecated, use shared/data)
+│   └── styles/            # Global styles
+├── backend/               # Backend server code
+│   ├── api.ts             # API utilities & data re-exports
+│   ├── db.ts              # Prisma client (mocked for build)
+│   └── socket/            # Socket.IO multiplayer server
+│       └── socket.ts
+├── database/              # Database layer
+│   └── prisma/
+│       └── schema.prisma  # Prisma schema
 ├── game/                  # Phaser game engine
 │   └── core/
 │       ├── GameConfig.ts  # Game configuration
 │       └── scenes/        # Game scenes
 │           ├── VillageScene.ts
 │           └── CharacterCreationScene.ts
+├── shared/                # Shared types & utilities (frontend + backend)
+│   ├── types/             # TypeScript type definitions
+│   ├── utils/             # Shared utilities
+│   └── constants/         # Shared constants
 ├── data/                  # Game content (data-driven)
 │   ├── npcs/              # NPC definitions
 │   ├── quests/            # Quest definitions
@@ -59,17 +76,6 @@ src/
 │   ├── dialogue/          # Dialogue trees
 │   ├── characters/        # Character customization
 │   └── world/             # World objects & map
-├── types/                 # TypeScript type definitions
-├── ui/                    # UI components
-│   └── components/
-│       ├── CharacterCreator.tsx
-│       ├── DialogueUI.tsx
-│       └── GameCanvas.tsx
-├── server/                # Server-side code
-│   └── socket.ts          # Multiplayer server
-└── lib/                   # Utility libraries
-    ├── db.ts              # Prisma client
-    └── api.ts             # API utilities
 ```
 
 ## Architecture
@@ -96,7 +102,7 @@ This project is designed for **modularity**. Content is stored as data, not hard
 
 ### Adding a New NPC
 
-Edit `src/data/npcs/index.ts`:
+Edit `data/npcs/index.ts`:
 
 ```typescript
 {
@@ -115,7 +121,7 @@ Edit `src/data/npcs/index.ts`:
 
 ### Adding a New Quest
 
-Edit `src/data/quests/index.ts`:
+Edit `data/quests/index.ts`:
 
 ```typescript
 {
@@ -133,7 +139,7 @@ Edit `src/data/quests/index.ts`:
 
 ### Adding New Clothing
 
-Edit `src/data/characters/index.ts`:
+Edit `data/characters/index.ts`:
 
 ```typescript
 export const tops: CharacterAppearance[] = [
@@ -144,7 +150,7 @@ export const tops: CharacterAppearance[] = [
 
 ### Adding an Interactable Object
 
-Edit `src/data/world/objects.ts`:
+Edit `data/world/objects.ts`:
 
 ```typescript
 {
@@ -176,9 +182,9 @@ npm start
 npm run lint
 
 # Database commands
-npx prisma studio      # Open Prisma Studio
-npx prisma db push     # Push schema changes
-npx prisma migrate dev # Create migration
+npx prisma generate --schema=database/prisma/schema.prisma
+npx prisma db push --schema=database/prisma/schema.prisma
+npx prisma studio --schema=database/prisma/schema.prisma
 ```
 
 ## Environment Variables

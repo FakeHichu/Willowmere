@@ -19,7 +19,13 @@
       }
     ],
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./*"],
+      "@frontend/*": ["./frontend/*"],
+      "@backend/*": ["./backend/*"],
+      "@game/*": ["./game/*"],
+      "@shared/*": ["./shared/*"],
+      "@data/*": ["./data/*"],
+      "@database/*": ["./database/*"]
     }
   },
   "include": [
