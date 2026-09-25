@@ -273,6 +273,7 @@ export interface NetworkPlayer {
   direction: Direction;
   state: PlayerState;
   lastUpdate: number;
+  isOnline?: boolean;
 }
 
 export interface NetworkMessage {

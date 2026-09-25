@@ -6,19 +6,23 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "socket": "tsx server.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.19.3",
+    "bcryptjs": "^3.0.3",
+    "jose": "^6.2.12",
     "next": "16.3.5",
     "phaser": "^4.2.1",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "socket.io": "^4.8.3",
-    "socket.io-client": "^4.8.3",
+    "socket.io-client": "^4.8.4",
     "uuid": "^14.0.2"
   },
   "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
     "@types/node": "^20",
     "@types/react": "19.3.0",
     "@types/react-dom": "^19",
@@ -28,6 +32,7 @@
     "eslint-config-next": "16.3.5",
     "postcss": "^8.5.28",
     "tailwindcss": "^3.4.19",
+    "tsx": "^4.23.15",
     "typescript": "^5"
   }
 }

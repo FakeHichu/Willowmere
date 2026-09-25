@@ -18,7 +18,12 @@ interface CharacterCreatorProps {
   onComplete: (customization: CharacterCustomization) => void;
 }
 
-export function CharacterCreator({ onComplete }: CharacterCreatorProps) {
+interface CharacterCreatorProps {
+  onComplete: (customization: CharacterCustomization) => void;
+  isLoading?: boolean;
+}
+
+export function CharacterCreator({ onComplete, isLoading = false }: CharacterCreatorProps) {
   const [customization, setCustomization] = useState<CharacterCustomization>(defaultCustomization);
   const [activeTab, setActiveTab] = useState<'body' | 'hair' | 'clothing' | 'accessories'>('body');
 
@@ -303,9 +308,14 @@ export function CharacterCreator({ onComplete }: CharacterCreatorProps) {
             <div className="mt-8 pt-6 border-t-2 border-[#e8e0d0]">
               <button
                 onClick={() => onComplete(customization)}
-                className="w-full py-4 bg-[#558b2f] text-white rounded-xl font-bold text-lg hover:bg-[#689f38] transition-colors shadow-lg hover:shadow-xl"
+                disabled={isLoading}
+                className={`w-full py-4 rounded-xl font-bold text-lg hover:shadow-xl transition-all ${
+                  isLoading
+                    ? 'bg-[#9ccc65] text-white cursor-not-allowed'
+                    : 'bg-[#558b2f] text-white hover:bg-[#689f38] shadow-lg'
+                }`}
               >
-                Enter Village
+                {isLoading ? 'Creating Character...' : 'Enter Village'}
               </button>
             </div>
           </div>

@@ -13,6 +13,15 @@ interface NPCSprite extends Phaser.GameObjects.Container {
   body: Phaser.Physics.Arcade.Body;
 }
 
+// Network player with interpolation data
+interface InterpolatedPlayer extends NetworkPlayer {
+  sprite?: Phaser.GameObjects.Container;
+  renderPosition: Vector2;
+  targetPosition: Vector2;
+  lastUpdate: number;
+  isOnline: boolean; // Required for our local tracking
+}
+
 export class VillageScene extends Phaser.Scene {
   private player!: PlayerSprite;
   private playerState: PlayerState = 'idle';
@@ -21,20 +30,26 @@ export class VillageScene extends Phaser.Scene {
   private wasdKeys!: { W: Phaser.Input.Keyboard.Key; A: Phaser.Input.Keyboard.Key; S: Phaser.Input.Keyboard.Key; D: Phaser.Input.Keyboard.Key };
   private interactionKey!: Phaser.Input.Keyboard.Key;
   private playerCustomization: CharacterCustomization;
-  private otherPlayers: Map<string, NetworkPlayer & { sprite?: Phaser.GameObjects.Container }> = new Map();
+  private otherPlayers: Map<string, InterpolatedPlayer> = new Map();
   private npcs: NPCSprite[] = [];
   private worldObjects: Phaser.GameObjects.GameObject[] = [];
   private interactionPrompt: Phaser.GameObjects.Container | null = null;
   private dialogueUI: Phaser.GameObjects.Container | null = null;
   private sitTarget: Phaser.GameObjects.GameObject | null = null;
   private emitter?: Phaser.Events.EventEmitter;
+  
+  // Client-side prediction
+  private predictedPosition: Vector2 = { x: 0, y: 0 };
+  private lastSentPosition: Vector2 = { x: 0, y: 0 };
+  private lastServerPosition: Vector2 = { x: 0, y: 0 };
+  private movementBuffer: Array<{ position: Vector2; direction: Direction; state: PlayerState; timestamp: number }> = [];
 
   constructor() {
     super({ key: 'VillageScene' });
     this.playerCustomization = {} as CharacterCustomization;
   }
 
-  init(data: { customization: CharacterCustomization; emitter?: Phaser.Events.EventEmitter }) {
+  init(data: { customization: CharacterCustomization; emitter?: Phaser.Events.EventEmitter; playerId?: string; username?: string }) {
     this.playerCustomization = data.customization || {};
     this.emitter = data.emitter;
   }
@@ -52,7 +67,7 @@ export class VillageScene extends Phaser.Scene {
     // Create NPCs
     this.createNPCs();
 
-    // Create player
+    // Create player at spawn point (will be corrected by server)
     this.createPlayer();
 
     // Setup camera
@@ -347,10 +362,15 @@ export class VillageScene extends Phaser.Scene {
   }
 
   private createPlayer() {
+    // Player will be positioned by server after join
+    // Start at spawn point as fallback
     this.player = this.add.container(
       villageMap.spawnPoint.x,
       villageMap.spawnPoint.y
     ) as PlayerSprite;
+
+    this.predictedPosition = { x: villageMap.spawnPoint.x, y: villageMap.spawnPoint.y };
+    this.lastServerPosition = { x: villageMap.spawnPoint.x, y: villageMap.spawnPoint.y };
 
     // Create player sprite based on customization
     this.updatePlayerAppearance();
@@ -448,13 +468,51 @@ export class VillageScene extends Phaser.Scene {
       this.removeOtherPlayer(playerId);
     });
 
+    this.emitter.on('player_offline', (playerId: string) => {
+      this.setPlayerOffline(playerId);
+    });
+
     this.emitter.on('player_move', (data: Partial<NetworkPlayer> & { id: string }) => {
       this.updateOtherPlayer(data);
     });
+
+    // Server-authoritative position correction
+    this.emitter.on('player_position_correction', (data: { position: Vector2; direction: Direction; state: PlayerState }) => {
+      this.reconcilePosition(data);
+    });
+  }
+
+  private reconcilePosition(data: { position: Vector2; direction: Direction; state: PlayerState }) {
+    // Server sent authoritative position - reconcile with prediction
+    this.lastServerPosition = data.position;
+    
+    // Smooth correction - interpolate to server position
+    this.tweens.add({
+      targets: this.player,
+      x: data.position.x,
+      y: data.position.y,
+      duration: 50,
+      ease: 'Linear',
+      onComplete: () => {
+        this.predictedPosition = { ...data.position };
+      }
+    });
+
+    this.direction = data.direction;
+    this.playerState = data.state;
   }
 
   private addOtherPlayer(player: NetworkPlayer) {
     if (this.otherPlayers.has(player.id)) return;
+
+    const renderPos = { ...player.position };
+    const interpolatedPlayer: InterpolatedPlayer = {
+      ...player,
+      renderPosition: renderPos,
+      targetPosition: renderPos,
+      lastUpdate: player.lastUpdate,
+      isOnline: player.isOnline ?? true,
+    };
 
     const container = this.add.container(player.position.x, player.position.y);
 
@@ -468,9 +526,18 @@ export class VillageScene extends Phaser.Scene {
       padding: { x: 2, y: 1 }
     }).setOrigin(0.5);
 
-    container.add([body, head, nameText]);
+    // Offline indicator
+    const offlineText = this.add.text(0, -50, '', {
+      fontSize: '9px',
+      color: '#ff9800',
+      backgroundColor: '#000000aa',
+      padding: { x: 2, y: 1 }
+    }).setOrigin(0.5).setVisible(false);
 
-    this.otherPlayers.set(player.id, { ...player, sprite: container });
+    container.add([body, head, nameText, offlineText]);
+
+    interpolatedPlayer.sprite = container;
+    this.otherPlayers.set(player.id, interpolatedPlayer);
   }
 
   private removeOtherPlayer(playerId: string) {
@@ -481,23 +548,50 @@ export class VillageScene extends Phaser.Scene {
     this.otherPlayers.delete(playerId);
   }
 
-  private updateOtherPlayer(data: Partial<NetworkPlayer> & { id: string }) {
+  private setPlayerOffline(playerId: string) {
+    const player = this.otherPlayers.get(playerId);
+    if (!player || !player.sprite) return;
+
+    player.isOnline = false;
+    const offlineText = player.sprite.getAt(3) as Phaser.GameObjects.Text;
+    if (offlineText) {
+      offlineText.setText('[OFFLINE]');
+      offlineText.setVisible(true);
+    }
+    // Make sprite slightly transparent
+    player.sprite.setAlpha(0.7);
+  }
+
+  private updateOtherPlayer(data: Partial<NetworkPlayer> & { id: string; isOnline?: boolean }) {
     const player = this.otherPlayers.get(data.id);
     if (!player || !player.sprite) return;
 
     if (data.position) {
-      // Smooth interpolation
-      this.tweens.add({
-        targets: player.sprite,
-        x: data.position.x,
-        y: data.position.y,
-        duration: 100
-      });
+      // Update target position for smooth interpolation
+      player.targetPosition = data.position;
+      player.lastUpdate = data.lastUpdate || Date.now();
+    }
+    if (data.direction) {
+      player.direction = data.direction;
+    }
+    if (data.state) {
+      player.state = data.state;
+    }
+    if (data.isOnline !== undefined) {
+      player.isOnline = data.isOnline;
+      const offlineText = player.sprite?.getAt(3) as Phaser.GameObjects.Text;
+      if (offlineText) {
+        offlineText.setVisible(!data.isOnline);
+      }
+      player.sprite?.setAlpha(data.isOnline ? 1 : 0.7);
     }
   }
 
   update() {
     if (!this.player || !this.player.body) return;
+
+    // Interpolate other players
+    this.interpolateOtherPlayers();
 
     if (this.playerState === 'sitting') {
       this.handleSitting();
@@ -506,6 +600,29 @@ export class VillageScene extends Phaser.Scene {
 
     this.handleMovement();
     this.checkInteractions();
+  }
+
+  private interpolateOtherPlayers() {
+    this.otherPlayers.forEach((player) => {
+      if (!player.sprite) return;
+
+      // Smooth interpolation towards target position
+      const dx = player.targetPosition.x - player.renderPosition.x;
+      const dy = player.targetPosition.y - player.renderPosition.y;
+      const distance = Math.sqrt(dx * dx + dy * dy);
+
+      if (distance > 1) {
+        // Move towards target
+        const lerpFactor = 0.15;
+        player.renderPosition.x += dx * lerpFactor;
+        player.renderPosition.y += dy * lerpFactor;
+        player.sprite.setPosition(player.renderPosition.x, player.renderPosition.y);
+      } else {
+        // Snap to target if close
+        player.renderPosition = { ...player.targetPosition };
+        player.sprite.setPosition(player.targetPosition.x, player.targetPosition.y);
+      }
+    });
   }
 
   private handleMovement() {
@@ -536,15 +653,53 @@ export class VillageScene extends Phaser.Scene {
       velocityY *= 0.707;
     }
 
-    this.player.body.setVelocity(velocityX, velocityY);
+    // Client-side prediction: move locally immediately
+    const newX = this.player.x + velocityX * (1/60); // Approximate frame time
+    const newY = this.player.y + velocityY * (1/60);
+    
+    // Clamp to world bounds locally
+    const clampedX = Phaser.Math.Clamp(newX, 16, WORLD_BOUNDS.width - 16);
+    const clampedY = Phaser.Math.Clamp(newY, 16, WORLD_BOUNDS.height - 16);
+
+    this.player.setPosition(clampedX, clampedY);
+    this.predictedPosition = { x: clampedX, y: clampedY };
 
     // Update player state
-    if (velocityX !== 0 || velocityY !== 0) {
+    const isMoving = velocityX !== 0 || velocityY !== 0;
+    if (isMoving) {
       this.playerState = 'walking';
-      this.emitMovement();
     } else {
       this.playerState = 'idle';
     }
+
+    // Send movement input to server (throttled)
+    if (isMoving || this.playerState === 'idle') {
+      this.sendMovementInput();
+    }
+  }
+
+  private sendMovementInput() {
+    if (!this.emitter) return;
+
+    const now = Date.now();
+    // Throttle to ~20 updates per second
+    if (now - (this.movementBuffer[this.movementBuffer.length - 1]?.timestamp || 0) < 50) {
+      return;
+    }
+
+    const inputData = {
+      position: { x: this.player.x, y: this.player.y },
+      direction: this.direction,
+      state: this.playerState,
+      timestamp: now,
+    };
+
+    this.movementBuffer.push(inputData);
+    if (this.movementBuffer.length > 10) {
+      this.movementBuffer.shift();
+    }
+
+    this.emitter.emit('player_move_input', inputData);
   }
 
   private handleSitting() {
