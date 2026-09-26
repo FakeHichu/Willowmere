@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import type { DialogueTree, DialogueNode, DialogueChoice } from '@shared/types';
+import { useState, useEffect, useMemo, useCallback } from 'react';
+import type { DialogueNode, DialogueChoice } from '@shared/types';
 import { getDialogueTreeById } from '@data/dialogue';
 import { getNpcById } from '@data/npcs';
 
@@ -12,22 +12,24 @@ interface DialogueUIProps {
 }
 
 export function DialogueUI({ npcId, onClose, onQuestAccept }: DialogueUIProps) {
-  const [dialogueTree, setDialogueTree] = useState<DialogueTree | null>(null);
-  const [currentNode, setCurrentNode] = useState<DialogueNode | null>(null);
-  const [isVisible, setIsVisible] = useState(false);
-  const [textIndex, setTextIndex] = useState(0);
+  const [isVisible, setIsVisible] = useState(true);
 
   const npc = getNpcById(npcId);
 
-  useEffect(() => {
-    const tree = getDialogueTreeById(`dialogue_${npcId.replace('npc_', '')}`);
-    if (tree) {
-      setDialogueTree(tree);
-      const startNode = tree.nodes.find(n => n.id === 'greeting');
-      setCurrentNode(startNode || null);
-      setIsVisible(true);
-    }
+  const dialogueTree = useMemo(() => {
+    if (!npcId) return null;
+    return getDialogueTreeById(`dialogue_${npcId.replace('npc_', '')}`) ?? null;
   }, [npcId]);
+
+  const [currentNode, setCurrentNode] = useState<DialogueNode | null>(() => {
+    const tree = getDialogueTreeById(`dialogue_${npcId.replace('npc_', '')}`);
+    return tree?.nodes.find(n => n.id === 'greeting') || null;
+  });
+
+  const handleClose = useCallback(() => {
+    setIsVisible(false);
+    setTimeout(onClose, 300);
+  }, [onClose]);
 
   useEffect(() => {
     // Handle keyboard input for dialogue
@@ -39,7 +41,7 @@ export function DialogueUI({ npcId, onClose, onQuestAccept }: DialogueUIProps) {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  }, [handleClose]);
 
   const handleChoice = (choice: DialogueChoice) => {
     // Handle action if present
@@ -55,7 +57,6 @@ export function DialogueUI({ npcId, onClose, onQuestAccept }: DialogueUIProps) {
     const nextNode = dialogueTree?.nodes.find(n => n.id === choice.nextNodeId);
     if (nextNode) {
       setCurrentNode(nextNode);
-      setTextIndex(0);
     }
   };
 
@@ -75,11 +76,6 @@ export function DialogueUI({ npcId, onClose, onQuestAccept }: DialogueUIProps) {
       default:
         console.log('Unknown action:', action.type);
     }
-  };
-
-  const handleClose = () => {
-    setIsVisible(false);
-    setTimeout(onClose, 300);
   };
 
   if (!dialogueTree || !currentNode || !npc) return null;

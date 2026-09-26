@@ -9,11 +9,27 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// Account User for authentication
+model User {
+  id           String        @id @default(uuid())
+  username     String        @unique
+  email        String        @unique
+  passwordHash String
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  player       Player?
+  sessions     GameSession[]
+
+  @@map("users")
+}
+
 // Player character and persistent data
 model Player {
   id          String   @id @default(uuid())
+  userId      String   @unique
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   username    String   @unique
-  email       String?  @unique
 
   // Character customization
   skinTone    String   @default("skin_03")
@@ -40,6 +56,10 @@ model Player {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   lastOnline  DateTime @default(now())
+
+  // Map/Building state
+  currentMap      String   @default("village")
+  currentBuilding String?
 
   // Relations
   inventory   InventoryItem[]
@@ -97,13 +117,15 @@ model Friendship {
   @@map("friendships")
 }
 
-// Session for multiplayer
+// Session for multiplayer authentication
 model GameSession {
   id          String   @id @default(uuid())
-  playerId    String
+  userId      String
   token       String   @unique
   expiresAt   DateTime
   createdAt   DateTime @default(now())
+
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("game_sessions")
 }

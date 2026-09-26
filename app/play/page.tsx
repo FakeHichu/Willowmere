@@ -12,29 +12,66 @@ const GameCanvas = dynamic(
   { ssr: false }
 );
 
+interface PlayerData {
+  id: string;
+  username: string;
+  customization: CharacterCustomization;
+  position: { x: number; y: number };
+  currency: number;
+}
+
 export default function PlayPage() {
   const router = useRouter();
-  const [customization, setCustomization] = useState<CharacterCustomization | null>(null);
+  const [player, setPlayer] = useState<PlayerData | null>(null);
   const [activeNpcId, setActiveNpcId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [gameTime, setGameTime] = useState<string>('Day 1, 08:00 AM');
   const [activeQuests, setActiveQuests] = useState<string[]>([]);
   const [inventory, setInventory] = useState<{ itemId: string; quantity: number }[]>([]);
 
+  // UI modal toggles
+  const [showQuestLog, setShowQuestLog] = useState(false);
+  const [showInventory, setShowInventory] = useState(false);
+
   useEffect(() => {
-    // Load character customization from localStorage
-    const saved = localStorage.getItem('willowmere_character');
-    if (saved) {
+    let isMounted = true;
+    async function loadAuthUser() {
       try {
-        setCustomization(JSON.parse(saved));
-      } catch (e) {
-        console.error('Failed to parse saved character:', e);
-        router.push('/create');
+        const res = await fetch('/api/auth/me');
+        if (!res.ok) {
+          if (isMounted) router.push('/create');
+          return;
+        }
+        const data = await res.json();
+        if (isMounted && data.player) {
+          setPlayer(data.player);
+          if (data.player.inventory) {
+            setInventory(data.player.inventory);
+          }
+          setIsLoading(false);
+        } else {
+          if (isMounted) router.push('/create');
+        }
+      } catch (err) {
+        console.error('Failed to load authenticated player:', err);
+        if (isMounted) router.push('/create');
       }
-    } else {
+    }
+
+    loadAuthUser();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [router]);
+
+  const handleLogout = async () => {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' });
+    } finally {
       router.push('/create');
     }
-    setIsLoading(false);
-  }, [router]);
+  };
 
   const handleDialogueStart = (npcId: string) => {
     setActiveNpcId(npcId);
@@ -45,11 +82,12 @@ export default function PlayPage() {
   };
 
   const handleQuestAccept = (questId: string) => {
-    setActiveQuests(prev => [...prev, questId]);
-    console.log('Quest accepted:', questId);
+    if (!activeQuests.includes(questId)) {
+      setActiveQuests(prev => [...prev, questId]);
+    }
   };
 
-  const handleItemPickup = (itemId: string, objectId: string) => {
+  const handleItemPickup = (itemId: string, _objectId: string) => {
     setInventory(prev => {
       const existing = prev.find(item => item.itemId === itemId);
       if (existing) {
@@ -61,10 +99,15 @@ export default function PlayPage() {
       }
       return [...prev, { itemId, quantity: 1 }];
     });
-    console.log('Item picked up:', itemId, 'Total inventory:', inventory);
   };
 
-  if (isLoading || !customization) {
+  const handleClockTick = (timeData: { timeString: string }) => {
+    if (timeData?.timeString) {
+      setGameTime(timeData.timeString);
+    }
+  };
+
+  if (isLoading || !player) {
     return (
       <div className="min-h-screen bg-[#f5f0e6] flex items-center justify-center">
         <div className="text-center">
@@ -76,8 +119,8 @@ export default function PlayPage() {
   }
 
   return (
-    <main className="min-h-screen bg-[#f5f0e6] flex flex-col">
-      {/* Game container */}
+    <main className="min-h-screen bg-[#f5f0e6] flex flex-col select-none">
+      {/* Game canvas container */}
       <div className="flex-1 relative">
         <Suspense
           fallback={
@@ -87,30 +130,132 @@ export default function PlayPage() {
           }
         >
           <GameCanvas
-            customization={customization}
+            customization={player.customization}
             onDialogueStart={handleDialogueStart}
             onItemPickup={handleItemPickup}
+            onClockTick={handleClockTick}
           />
         </Suspense>
       </div>
 
-      {/* HUD Overlay */}
-      <div className="fixed top-4 left-4 z-40">
+      {/* TOP LEFT: Player Info & Clock HUD */}
+      <div className="fixed top-4 left-4 z-40 flex flex-col sm:flex-row items-start sm:items-center gap-3">
         <div className="bg-[#f5f0e6] rounded-xl border-2 border-[#8d6e63] p-3 shadow-lg">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full bg-[#558b2f] flex items-center justify-center text-white font-bold">
-              T
+            <div className="w-10 h-10 rounded-full bg-[#558b2f] flex items-center justify-center text-white font-bold text-lg shadow">
+              {player.username.charAt(0).toUpperCase()}
             </div>
             <div>
-              <p className="font-bold text-[#5d4037]">Traveler</p>
-              <p className="text-xs text-[#8d6e63]">{activeQuests.length} active quest{activeQuests.length !== 1 ? 's' : ''}</p>
+              <p className="font-bold text-[#5d4037]">{player.username}</p>
+              <p className="text-xs text-[#8d6e63]">
+                {activeQuests.length} quest{activeQuests.length !== 1 ? 's' : ''} • {player.currency} coins
+              </p>
             </div>
           </div>
         </div>
+
+        {/* Live Synchronized Game Clock */}
+        <div className="bg-[#558b2f] text-white rounded-xl border-2 border-[#33691e] px-4 py-2 shadow-lg flex items-center gap-2">
+          <span className="text-lg">🕒</span>
+          <span className="font-bold text-sm tracking-wide">{gameTime}</span>
+        </div>
       </div>
 
-      {/* Controls hint */}
-      <div className="fixed bottom-4 left-4 z-40">
+      {/* TOP RIGHT: Action Buttons (Quest Log, Inventory, Logout) */}
+      <div className="fixed top-4 right-4 z-40 flex items-center gap-2">
+        <button
+          onClick={() => setShowQuestLog(!showQuestLog)}
+          className="bg-[#f5f0e6] hover:bg-[#efebe9] text-[#5d4037] border-2 border-[#8d6e63] rounded-xl px-3 py-2 text-xs font-bold shadow-lg transition-all flex items-center gap-1.5"
+        >
+          📜 Quests ({activeQuests.length})
+        </button>
+
+        <button
+          onClick={() => setShowInventory(!showInventory)}
+          className="bg-[#f5f0e6] hover:bg-[#efebe9] text-[#5d4037] border-2 border-[#8d6e63] rounded-xl px-3 py-2 text-xs font-bold shadow-lg transition-all flex items-center gap-1.5"
+        >
+          🎒 Inventory ({inventory.reduce((acc, i) => acc + i.quantity, 0)})
+        </button>
+
+        <button
+          onClick={handleLogout}
+          className="bg-[#d7ccc8] hover:bg-[#bcaaa4] text-[#5d4037] border-2 border-[#8d6e63] rounded-xl px-3 py-2 text-xs font-bold shadow-lg transition-all"
+        >
+          Logout
+        </button>
+      </div>
+
+      {/* Quest Log Modal */}
+      {showQuestLog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+          <div className="relative w-full max-w-md bg-[#f5f0e6] rounded-2xl border-4 border-[#8d6e63] p-6 shadow-2xl">
+            <button
+              onClick={() => setShowQuestLog(false)}
+              className="absolute top-4 right-4 text-[#8d6e63] hover:text-[#5d4037] text-xl font-bold"
+            >
+              ✕
+            </button>
+            <h3 className="text-2xl font-bold text-[#5d4037] mb-4 flex items-center gap-2">
+              📜 Quest Log
+            </h3>
+            {activeQuests.length === 0 ? (
+              <p className="text-sm text-[#8d6e63] italic">No active quests. Talk to Arthur or villagers in Willowmere!</p>
+            ) : (
+              <ul className="space-y-3">
+                {activeQuests.map((qId) => (
+                  <li key={qId} className="bg-white p-3 rounded-lg border border-[#d7ccc8]">
+                    <p className="font-bold text-sm text-[#5d4037]">
+                      {qId === 'quest_tool_repair'
+                        ? "Arthur's Scrap Iron Task"
+                        : qId === 'quest_flower_hunt'
+                        ? "Lily's Wildflower Collection"
+                        : "Village Quest"}
+                    </p>
+                    <p className="text-xs text-[#8d6e63] mt-1">Status: Active</p>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Inventory Modal */}
+      {showInventory && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+          <div className="relative w-full max-w-md bg-[#f5f0e6] rounded-2xl border-4 border-[#8d6e63] p-6 shadow-2xl">
+            <button
+              onClick={() => setShowInventory(false)}
+              className="absolute top-4 right-4 text-[#8d6e63] hover:text-[#5d4037] text-xl font-bold"
+            >
+              ✕
+            </button>
+            <h3 className="text-2xl font-bold text-[#5d4037] mb-4 flex items-center gap-2">
+              🎒 Inventory
+            </h3>
+            {inventory.length === 0 ? (
+              <p className="text-sm text-[#8d6e63] italic">Your bag is empty. Explore Willowmere to pick up flowers and items!</p>
+            ) : (
+              <div className="grid grid-cols-4 gap-3">
+                {inventory.map((item) => (
+                  <div key={item.itemId} className="bg-white p-2 rounded-lg border-2 border-[#d7ccc8] text-center">
+                    <div className="w-8 h-8 mx-auto mb-1 bg-[#e8f5e9] rounded flex items-center justify-center text-lg">
+                      {item.itemId.includes('flower') ? '🌻' : item.itemId.includes('iron') ? '⚙️' : '📦'}
+                    </div>
+                    <p className="text-[10px] font-bold text-[#5d4037] truncate">
+                      {item.itemId.replace('item_', '').replace('_', ' ')}
+                    </p>
+                    <p className="text-[10px] text-[#8d6e63]">x{item.quantity}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Bottom Controls hint */}
+      <div className="fixed bottom-4 left-4 z-40 hidden sm:block">
         <div className="bg-[#f5f0e6]/90 backdrop-blur-sm rounded-lg border-2 border-[#8d6e63] px-4 py-2 shadow-lg">
           <p className="text-xs text-[#8d6e63]">
             <span className="font-mono bg-[#d7ccc8] px-1.5 py-0.5 rounded mr-1">WASD</span>
@@ -120,6 +265,21 @@ export default function PlayPage() {
             <span className="font-mono bg-[#d7ccc8] px-1.5 py-0.5 rounded mx-1">E</span>
             to interact
           </p>
+        </div>
+      </div>
+
+      {/* Mobile Touch Overlay Controls */}
+      <div className="fixed bottom-4 right-4 z-40 sm:hidden flex items-center gap-4">
+        <div className="grid grid-cols-3 gap-1 bg-[#8d6e63]/80 p-2 rounded-full shadow-2xl backdrop-blur">
+          <div />
+          <button className="w-10 h-10 bg-[#f5f0e6] rounded-full font-bold text-[#5d4037] active:bg-[#558b2f] active:text-white">↑</button>
+          <div />
+          <button className="w-10 h-10 bg-[#f5f0e6] rounded-full font-bold text-[#5d4037] active:bg-[#558b2f] active:text-white">←</button>
+          <button className="w-10 h-10 bg-[#558b2f] rounded-full font-bold text-white shadow">E</button>
+          <button className="w-10 h-10 bg-[#f5f0e6] rounded-full font-bold text-[#5d4037] active:bg-[#558b2f] active:text-white">→</button>
+          <div />
+          <button className="w-10 h-10 bg-[#f5f0e6] rounded-full font-bold text-[#5d4037] active:bg-[#558b2f] active:text-white">↓</button>
+          <div />
         </div>
       </div>
 

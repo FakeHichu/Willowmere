@@ -11,7 +11,7 @@ import {
   shoes,
   accessories,
   defaultCustomization,
-  clothingColors
+  clothingColors,
 } from '@data/characters';
 
 interface CharacterCreatorProps {
@@ -23,98 +23,165 @@ export function CharacterCreator({ onComplete }: CharacterCreatorProps) {
   const [activeTab, setActiveTab] = useState<'body' | 'hair' | 'clothing' | 'accessories'>('body');
 
   const updateCustomization = (key: keyof CharacterCustomization, value: string | null) => {
-    setCustomization(prev => ({ ...prev, [key]: value }));
+    setCustomization((prev) => ({ ...prev, [key]: value }));
   };
 
+  const handleRandomize = () => {
+    const randomSkin = skinTones[Math.floor(Math.random() * skinTones.length)].id;
+    const randomHair = hairstyles[Math.floor(Math.random() * hairstyles.length)].id;
+    const randomHairColor = hairColors[Math.floor(Math.random() * hairColors.length)];
+    const randomTop = tops[Math.floor(Math.random() * tops.length)].id;
+    const randomTopColor = clothingColors[Math.floor(Math.random() * clothingColors.length)];
+    const randomBottom = bottoms[Math.floor(Math.random() * bottoms.length)].id;
+    const randomBottomColor = clothingColors[Math.floor(Math.random() * clothingColors.length)];
+    const randomShoes = shoes[Math.floor(Math.random() * shoes.length)].id;
+    const randomShoesColor = clothingColors[Math.floor(Math.random() * clothingColors.length)];
+    const randomAccessoryObj = Math.random() > 0.4 ? accessories[Math.floor(Math.random() * accessories.length)].id : null;
+
+    setCustomization({
+      skinTone: randomSkin,
+      hair: randomHair,
+      hairColor: randomHairColor,
+      top: randomTop,
+      topColor: randomTopColor,
+      bottom: randomBottom,
+      bottomColor: randomBottomColor,
+      shoes: randomShoes,
+      shoesColor: randomShoesColor,
+      accessory: randomAccessoryObj,
+    });
+  };
+
+  const skinColor = skinTones.find((s) => s.id === customization.skinTone)?.hex || '#e8c4a2';
+
   const renderSkinToneSelector = () => (
-    <div className="space-y-2">
-      <h4 className="font-medium text-[#5d4037]">Skin Tone</h4>
-      <div className="flex flex-wrap gap-2">
-        {skinTones.map(skin => (
-          <button
-            key={skin.id}
-            onClick={() => updateCustomization('skinTone', skin.id)}
-            className={`w-10 h-10 rounded-lg border-2 transition-all ${
-              customization.skinTone === skin.id
-                ? 'border-[#558b2f] ring-2 ring-[#558b2f] ring-offset-2'
-                : 'border-[#d7ccc8] hover:border-[#8d6e63]'
-            }`}
-            style={{ backgroundColor: skin.hex }}
-            title={skin.name}
-          />
-        ))}
+    <div className="space-y-6">
+      <div>
+        <h4 className="font-bold text-[#5d4037] text-sm mb-1 flex items-center gap-2">
+          <span>🎨</span> Skin Tone & Complexion
+        </h4>
+        <p className="text-xs text-[#8d6e63] mb-4">Choose your character&apos;s natural skin tone</p>
+
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+          {skinTones.map((skin) => {
+            const isSelected = customization.skinTone === skin.id;
+            return (
+              <button
+                key={skin.id}
+                type="button"
+                onClick={() => updateCustomization('skinTone', skin.id)}
+                className={`flex items-center gap-3 p-3 rounded-2xl border-2 transition-all text-left shadow-sm ${
+                  isSelected
+                    ? 'border-[#558b2f] bg-[#c8e6c9]/40 ring-4 ring-[#558b2f]/20 scale-[1.02]'
+                    : 'border-[#d7ccc8] bg-white hover:border-[#8d6e63]'
+                }`}
+              >
+                <span
+                  className="w-8 h-8 rounded-full border border-black/10 shadow-inner flex-shrink-0"
+                  style={{ backgroundColor: skin.hex }}
+                />
+                <div className="overflow-hidden">
+                  <p className="text-xs font-bold text-[#5d4037] truncate">{skin.name}</p>
+                  <p className="text-[10px] text-[#8d6e63] font-mono">{skin.hex}</p>
+                </div>
+              </button>
+            );
+          })}
+        </div>
       </div>
     </div>
   );
 
   const renderHairSelector = () => (
-    <div className="space-y-4">
-      <div className="space-y-2">
-        <h4 className="font-medium text-[#5d4037]">Hairstyle</h4>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-          {hairstyles.map(hair => (
-            <button
-              key={hair.id}
-              onClick={() => updateCustomization('hair', hair.id)}
-              className={`px-3 py-2 rounded-lg border-2 text-sm transition-all ${
-                customization.hair === hair.id
-                  ? 'border-[#558b2f] bg-[#c8e6c9] text-[#2e7d32]'
-                  : 'border-[#d7ccc8] hover:border-[#8d6e63] text-[#5d4037]'
-              }`}
-            >
-              {hair.name}
-            </button>
-          ))}
+    <div className="space-y-6">
+      <div>
+        <h4 className="font-bold text-[#5d4037] text-sm mb-1 flex items-center gap-2">
+          <span>✂️</span> Hairstyle
+        </h4>
+        <p className="text-xs text-[#8d6e63] mb-3">Select your haircut</p>
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+          {hairstyles.map((hair) => {
+            const isSelected = customization.hair === hair.id;
+            return (
+              <button
+                key={hair.id}
+                type="button"
+                onClick={() => updateCustomization('hair', hair.id)}
+                className={`px-4 py-3 rounded-xl border-2 text-xs font-bold transition-all text-center ${
+                  isSelected
+                    ? 'border-[#558b2f] bg-[#558b2f] text-white shadow-md'
+                    : 'border-[#d7ccc8] bg-white text-[#5d4037] hover:border-[#8d6e63]'
+                }`}
+              >
+                {hair.name}
+              </button>
+            );
+          })}
         </div>
       </div>
 
-      <div className="space-y-2">
-        <h4 className="font-medium text-[#5d4037]">Hair Color</h4>
-        <div className="flex flex-wrap gap-2">
-          {hairColors.map(color => (
-            <button
-              key={color}
-              onClick={() => updateCustomization('hairColor', color)}
-              className={`w-8 h-8 rounded-lg border-2 transition-all ${
-                customization.hairColor === color
-                  ? 'border-[#558b2f] ring-2 ring-[#558b2f] ring-offset-2'
-                  : 'border-[#d7ccc8] hover:border-[#8d6e63]'
-              }`}
-              style={{ backgroundColor: color }}
-            />
-          ))}
+      <div>
+        <h4 className="font-bold text-[#5d4037] text-sm mb-1 flex items-center gap-2">
+          <span>🎨</span> Hair Color
+        </h4>
+        <p className="text-xs text-[#8d6e63] mb-3">Choose a hair color</p>
+        <div className="flex flex-wrap gap-2.5">
+          {hairColors.map((color) => {
+            const isSelected = customization.hairColor === color;
+            return (
+              <button
+                key={color}
+                type="button"
+                onClick={() => updateCustomization('hairColor', color)}
+                className={`w-9 h-9 rounded-xl border-2 transition-all shadow-sm ${
+                  isSelected
+                    ? 'border-[#558b2f] ring-4 ring-[#558b2f]/30 scale-110'
+                    : 'border-[#d7ccc8] hover:border-[#8d6e63] hover:scale-105'
+                }`}
+                style={{ backgroundColor: color }}
+              />
+            );
+          })}
         </div>
       </div>
     </div>
   );
 
   const renderClothingSelector = () => (
-    <div className="space-y-4">
-      <div className="space-y-2">
-        <h4 className="font-medium text-[#5d4037]">Top</h4>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-          {tops.map(top => (
-            <button
-              key={top.id}
-              onClick={() => updateCustomization('top', top.id)}
-              className={`px-3 py-2 rounded-lg border-2 text-sm transition-all ${
-                customization.top === top.id
-                  ? 'border-[#558b2f] bg-[#c8e6c9] text-[#2e7d32]'
-                  : 'border-[#d7ccc8] hover:border-[#8d6e63] text-[#5d4037]'
-              }`}
-            >
-              {top.name}
-            </button>
-          ))}
+    <div className="space-y-6">
+      {/* Top section */}
+      <div>
+        <h4 className="font-bold text-[#5d4037] text-sm mb-1 flex items-center gap-2">
+          <span>👔</span> Shirt / Top
+        </h4>
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-3">
+          {tops.map((top) => {
+            const isSelected = customization.top === top.id;
+            return (
+              <button
+                key={top.id}
+                type="button"
+                onClick={() => updateCustomization('top', top.id)}
+                className={`px-3 py-2.5 rounded-xl border-2 text-xs font-bold transition-all ${
+                  isSelected
+                    ? 'border-[#558b2f] bg-[#558b2f] text-white shadow-md'
+                    : 'border-[#d7ccc8] bg-white text-[#5d4037] hover:border-[#8d6e63]'
+                }`}
+              >
+                {top.name}
+              </button>
+            );
+          })}
         </div>
-        <div className="flex flex-wrap gap-2 mt-2">
-          {clothingColors.slice(0, 12).map(color => (
+        <div className="flex flex-wrap gap-2">
+          {clothingColors.slice(0, 14).map((color) => (
             <button
               key={color}
+              type="button"
               onClick={() => updateCustomization('topColor', color)}
               className={`w-7 h-7 rounded-lg border-2 transition-all ${
                 customization.topColor === color
-                  ? 'border-[#558b2f] ring-2 ring-[#558b2f] ring-offset-1'
+                  ? 'border-[#558b2f] ring-4 ring-[#558b2f]/30 scale-110'
                   : 'border-[#d7ccc8] hover:border-[#8d6e63]'
               }`}
               style={{ backgroundColor: color }}
@@ -123,31 +190,39 @@ export function CharacterCreator({ onComplete }: CharacterCreatorProps) {
         </div>
       </div>
 
-      <div className="space-y-2">
-        <h4 className="font-medium text-[#5d4037]">Bottom</h4>
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-          {bottoms.map(bottom => (
-            <button
-              key={bottom.id}
-              onClick={() => updateCustomization('bottom', bottom.id)}
-              className={`px-3 py-2 rounded-lg border-2 text-sm transition-all ${
-                customization.bottom === bottom.id
-                  ? 'border-[#558b2f] bg-[#c8e6c9] text-[#2e7d32]'
-                  : 'border-[#d7ccc8] hover:border-[#8d6e63] text-[#5d4037]'
-              }`}
-            >
-              {bottom.name}
-            </button>
-          ))}
+      {/* Bottom section */}
+      <div>
+        <h4 className="font-bold text-[#5d4037] text-sm mb-1 flex items-center gap-2">
+          <span>👖</span> Pants / Bottom
+        </h4>
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-3">
+          {bottoms.map((bottom) => {
+            const isSelected = customization.bottom === bottom.id;
+            return (
+              <button
+                key={bottom.id}
+                type="button"
+                onClick={() => updateCustomization('bottom', bottom.id)}
+                className={`px-3 py-2.5 rounded-xl border-2 text-xs font-bold transition-all ${
+                  isSelected
+                    ? 'border-[#558b2f] bg-[#558b2f] text-white shadow-md'
+                    : 'border-[#d7ccc8] bg-white text-[#5d4037] hover:border-[#8d6e63]'
+                }`}
+              >
+                {bottom.name}
+              </button>
+            );
+          })}
         </div>
-        <div className="flex flex-wrap gap-2 mt-2">
-          {['#8B4513', '#556B2F', '#D4A76A', '#2F4F4F', '#4682B4', '#F5DEB3'].map(color => (
+        <div className="flex flex-wrap gap-2">
+          {['#8B4513', '#556B2F', '#D4A76A', '#2F4F4F', '#4682B4', '#F5DEB3', '#3E2723', '#263238'].map((color) => (
             <button
               key={color}
+              type="button"
               onClick={() => updateCustomization('bottomColor', color)}
               className={`w-7 h-7 rounded-lg border-2 transition-all ${
                 customization.bottomColor === color
-                  ? 'border-[#558b2f] ring-2 ring-[#558b2f] ring-offset-1'
+                  ? 'border-[#558b2f] ring-4 ring-[#558b2f]/30 scale-110'
                   : 'border-[#d7ccc8] hover:border-[#8d6e63]'
               }`}
               style={{ backgroundColor: color }}
@@ -156,22 +231,29 @@ export function CharacterCreator({ onComplete }: CharacterCreatorProps) {
         </div>
       </div>
 
-      <div className="space-y-2">
-        <h4 className="font-medium text-[#5d4037]">Shoes</h4>
+      {/* Shoes section */}
+      <div>
+        <h4 className="font-bold text-[#5d4037] text-sm mb-1 flex items-center gap-2">
+          <span>👞</span> Shoes
+        </h4>
         <div className="grid grid-cols-2 gap-2">
-          {shoes.map(shoe => (
-            <button
-              key={shoe.id}
-              onClick={() => updateCustomization('shoes', shoe.id)}
-              className={`px-3 py-2 rounded-lg border-2 text-sm transition-all ${
-                customization.shoes === shoe.id
-                  ? 'border-[#558b2f] bg-[#c8e6c9] text-[#2e7d32]'
-                  : 'border-[#d7ccc8] hover:border-[#8d6e63] text-[#5d4037]'
-              }`}
-            >
-              {shoe.name}
-            </button>
-          ))}
+          {shoes.map((shoe) => {
+            const isSelected = customization.shoes === shoe.id;
+            return (
+              <button
+                key={shoe.id}
+                type="button"
+                onClick={() => updateCustomization('shoes', shoe.id)}
+                className={`px-3 py-2.5 rounded-xl border-2 text-xs font-bold transition-all ${
+                  isSelected
+                    ? 'border-[#558b2f] bg-[#558b2f] text-white shadow-md'
+                    : 'border-[#d7ccc8] bg-white text-[#5d4037] hover:border-[#8d6e63]'
+                }`}
+              >
+                {shoe.name}
+              </button>
+            );
+          })}
         </div>
       </div>
     </div>
@@ -179,133 +261,170 @@ export function CharacterCreator({ onComplete }: CharacterCreatorProps) {
 
   const renderAccessorySelector = () => (
     <div className="space-y-4">
-      <div className="space-y-2">
-        <h4 className="font-medium text-[#5d4037]">Accessory</h4>
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+      <div>
+        <h4 className="font-bold text-[#5d4037] text-sm mb-1 flex items-center gap-2">
+          <span>👑</span> Accessories & Hats
+        </h4>
+        <p className="text-xs text-[#8d6e63] mb-4">Add a special hat or glasses to your avatar</p>
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
           <button
+            type="button"
             onClick={() => updateCustomization('accessory', null)}
-            className={`px-3 py-2 rounded-lg border-2 text-sm transition-all ${
+            className={`px-4 py-3 rounded-2xl border-2 text-xs font-bold transition-all text-center ${
               !customization.accessory
-                ? 'border-[#558b2f] bg-[#c8e6c9] text-[#2e7d32]'
-                : 'border-[#d7ccc8] hover:border-[#8d6e63] text-[#5d4037]'
+                ? 'border-[#558b2f] bg-[#558b2f] text-white shadow-md'
+                : 'border-[#d7ccc8] bg-white text-[#5d4037] hover:border-[#8d6e63]'
             }`}
           >
-            None
+            🚫 None
           </button>
-          {accessories.map(acc => (
-            <button
-              key={acc.id}
-              onClick={() => updateCustomization('accessory', acc.id)}
-              className={`px-3 py-2 rounded-lg border-2 text-sm transition-all ${
-                customization.accessory === acc.id
-                  ? 'border-[#558b2f] bg-[#c8e6c9] text-[#2e7d32]'
-                  : 'border-[#d7ccc8] hover:border-[#8d6e63] text-[#5d4037]'
-              }`}
-            >
-              {acc.name}
-            </button>
-          ))}
+          {accessories.map((acc) => {
+            const isSelected = customization.accessory === acc.id;
+            return (
+              <button
+                key={acc.id}
+                type="button"
+                onClick={() => updateCustomization('accessory', acc.id)}
+                className={`px-4 py-3 rounded-2xl border-2 text-xs font-bold transition-all text-center ${
+                  isSelected
+                    ? 'border-[#558b2f] bg-[#558b2f] text-white shadow-md'
+                    : 'border-[#d7ccc8] bg-white text-[#5d4037] hover:border-[#8d6e63]'
+                }`}
+              >
+                ✨ {acc.name}
+              </button>
+            );
+          })}
         </div>
       </div>
     </div>
   );
 
-  // Preview character colors
-  const skinColor = skinTones.find(s => s.id === customization.skinTone)?.hex || '#e8c4a2';
-
   return (
-    <div className="min-h-screen bg-gradient-to-b from-[#e8f5e9] to-[#f5f0e6] py-8 px-4">
-      <div className="max-w-6xl mx-auto">
+    <div className="min-h-screen bg-gradient-to-br from-[#1b2a1c] via-[#2d3a2b] to-[#1a231b] py-10 px-4 text-[#5d4037] select-none flex flex-col justify-center">
+      <div className="max-w-5xl mx-auto w-full">
+        {/* Header Title */}
         <div className="text-center mb-8">
-          <h1 className="text-4xl font-bold text-[#5d4037] mb-2">Create Your Character</h1>
-          <p className="text-[#8d6e63]">Customize your appearance before entering the village</p>
+          <span className="inline-block px-4 py-1.5 rounded-full bg-emerald-500/20 text-emerald-300 font-bold text-xs tracking-widest uppercase mb-3 border border-emerald-500/30 shadow-sm">
+            Cottagecore Avatar Studio
+          </span>
+          <h1 className="text-4xl sm:text-5xl font-extrabold text-amber-50 mb-2" style={{ fontFamily: 'Georgia, serif' }}>
+            Customize Your Traveler
+          </h1>
+          <p className="text-emerald-200/80 text-sm max-w-lg mx-auto">
+            Design your villager avatar before stepping into the world of Willowmere
+          </p>
         </div>
 
-        <div className="grid md:grid-cols-[300px_1fr] gap-8">
-          {/* Character Preview */}
-          <div className="bg-white rounded-2xl border-4 border-[#8d6e63] p-6 shadow-xl">
-            <h3 className="text-center text-[#5d4037] font-medium mb-4">Preview</h3>
-            <div
-              className="w-48 h-64 mx-auto rounded-xl flex items-center justify-center relative"
-              style={{ backgroundColor: '#f5f0e6' }}
-            >
-              {/* Simple character preview */}
-              <div className="relative">
-                {/* Legs */}
+        {/* Main 2-Column Grid */}
+        <div className="grid md:grid-cols-[320px_1fr] gap-8 items-start">
+          {/* LEFT COLUMN: Character Avatar Live Stage */}
+          <div className="bg-[#f5f0e6] rounded-3xl border-4 border-[#8d6e63] p-6 shadow-2xl relative overflow-hidden flex flex-col items-center">
+            <div className="w-full flex items-center justify-between mb-4">
+              <span className="text-xs font-bold text-[#8d6e63] uppercase tracking-wider">Live Preview</span>
+              <button
+                type="button"
+                onClick={handleRandomize}
+                className="px-3 py-1.5 bg-[#8d6e63] hover:bg-[#6d4c41] text-white rounded-xl text-xs font-bold transition-all shadow hover:scale-105"
+              >
+                🎲 Randomize
+              </button>
+            </div>
+
+            {/* Avatar Stage Grass Platform */}
+            <div className="w-full h-80 rounded-2xl bg-gradient-to-b from-[#e8f5e9] to-[#c8e6c9] border-2 border-[#8d6e63]/30 flex items-center justify-center relative shadow-inner overflow-hidden">
+              {/* Grassy ground platform shadow */}
+              <div className="absolute bottom-8 w-44 h-12 bg-[#7cb342] rounded-full blur-[2px] opacity-80" />
+              <div className="absolute bottom-6 w-52 h-16 bg-[#558b2f]/30 rounded-full blur-[10px]" />
+
+              {/* Character Model Representation */}
+              <div className="relative z-10 scale-150 transform translate-y-2">
+                {/* Legs / Bottom */}
                 <div
-                  className="absolute w-6 h-8 rounded"
+                  className="absolute w-7 h-10 rounded-b shadow-sm transition-colors duration-200"
                   style={{
                     backgroundColor: customization.bottomColor,
                     left: '50%',
                     transform: 'translateX(-50%)',
-                    bottom: '-20px'
+                    bottom: '-24px',
                   }}
                 />
-                {/* Body */}
+                {/* Body / Top */}
                 <div
-                  className="w-8 h-10 rounded"
+                  className="w-10 h-12 rounded-t-md shadow transition-colors duration-200"
                   style={{ backgroundColor: customization.topColor }}
                 />
                 {/* Head */}
                 <div
-                  className="w-6 h-6 rounded-full absolute -top-4 left-1/2 -translate-x-1/2"
+                  className="w-8 h-8 rounded-full absolute -top-5 left-1/2 -translate-x-1/2 shadow-sm transition-colors duration-200"
                   style={{ backgroundColor: skinColor }}
                 />
                 {/* Hair */}
                 <div
-                  className="w-8 h-3 rounded absolute -top-6 left-1/2 -translate-x-1/2"
+                  className="w-9 h-4 rounded-t-full absolute -top-7 left-1/2 -translate-x-1/2 transition-colors duration-200"
                   style={{ backgroundColor: customization.hairColor }}
                 />
                 {/* Eyes */}
-                <div className="w-1 h-1 bg-black rounded-full absolute -top-2 left-3" />
-                <div className="w-1 h-1 bg-black rounded-full absolute -top-2 left-5" />
+                <div className="w-1.5 h-1.5 bg-[#3e2723] rounded-full absolute -top-3 left-2.5" />
+                <div className="w-1.5 h-1.5 bg-[#3e2723] rounded-full absolute -top-3 right-2.5" />
                 {/* Shoes */}
                 <div
-                  className="w-3 h-2 rounded absolute -bottom-2 left-2"
+                  className="w-4 h-2.5 rounded-b absolute -bottom-3 left-1 shadow-sm"
                   style={{ backgroundColor: customization.shoesColor }}
                 />
                 <div
-                  className="w-3 h-2 rounded absolute -bottom-2 right-2"
+                  className="w-4 h-2.5 rounded-b absolute -bottom-3 right-1 shadow-sm"
                   style={{ backgroundColor: customization.shoesColor }}
                 />
               </div>
             </div>
+
+            <p className="text-[11px] text-[#8d6e63] mt-4 font-semibold text-center leading-normal">
+              Your customized character will save directly to your PostgreSQL account profile.
+            </p>
           </div>
 
-          {/* Customization Panel */}
-          <div className="bg-white rounded-2xl border-4 border-[#8d6e63] p-6 shadow-xl">
-            {/* Tabs */}
-            <div className="flex gap-2 mb-6">
-              {(['body', 'hair', 'clothing', 'accessories'] as const).map(tab => (
-                <button
-                  key={tab}
-                  onClick={() => setActiveTab(tab)}
-                  className={`flex-1 py-3 px-4 rounded-lg font-medium transition-all ${
-                    activeTab === tab
-                      ? 'bg-[#558b2f] text-white shadow-lg'
-                      : 'bg-[#f5f0e6] text-[#5d4037] hover:bg-[#efebe9]'
-                  }`}
-                >
-                  {tab.charAt(0).toUpperCase() + tab.slice(1)}
-                </button>
-              ))}
+          {/* RIGHT COLUMN: Customization Controls Card */}
+          <div className="bg-[#f5f0e6] rounded-3xl border-4 border-[#8d6e63] p-6 shadow-2xl flex flex-col">
+            {/* Category Navigation Tabs */}
+            <div className="grid grid-cols-4 gap-2 mb-6 bg-[#d7ccc8] p-1.5 rounded-2xl shadow-inner">
+              {(['body', 'hair', 'clothing', 'accessories'] as const).map((tab) => {
+                const isActive = activeTab === tab;
+                const tabIcons = { body: '👤', hair: '✂️', clothing: '👔', accessories: '👑' };
+                return (
+                  <button
+                    key={tab}
+                    type="button"
+                    onClick={() => setActiveTab(tab)}
+                    className={`py-3 px-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+                      isActive
+                        ? 'bg-[#558b2f] text-white shadow-lg scale-102'
+                        : 'text-[#5d4037] hover:bg-[#efebe9]'
+                    }`}
+                  >
+                    <span>{tabIcons[tab]}</span>
+                    <span className="hidden sm:inline">{tab.charAt(0).toUpperCase() + tab.slice(1)}</span>
+                  </button>
+                );
+              })}
             </div>
 
-            {/* Tab Content */}
-            <div className="min-h-[300px]">
+            {/* Active Tab Panel Content */}
+            <div className="min-h-[280px] flex-1">
               {activeTab === 'body' && renderSkinToneSelector()}
               {activeTab === 'hair' && renderHairSelector()}
               {activeTab === 'clothing' && renderClothingSelector()}
               {activeTab === 'accessories' && renderAccessorySelector()}
             </div>
 
-            {/* Confirm Button */}
-            <div className="mt-8 pt-6 border-t-2 border-[#e8e0d0]">
+            {/* Confirm & Save Button */}
+            <div className="mt-8 pt-6 border-t-2 border-[#d7ccc8]">
               <button
+                type="button"
                 onClick={() => onComplete(customization)}
-                className="w-full py-4 bg-[#558b2f] text-white rounded-xl font-bold text-lg hover:bg-[#689f38] transition-colors shadow-lg hover:shadow-xl"
+                className="w-full py-4 bg-gradient-to-r from-[#558b2f] to-[#689f38] hover:from-[#689f38] hover:to-[#7cb342] text-white rounded-2xl font-bold text-lg transition-all shadow-xl hover:shadow-2xl hover:scale-[1.01] active:scale-[0.99] border border-emerald-400/30"
               >
-                Enter Village
+                🏡 Save & Enter Village
               </button>
             </div>
           </div>

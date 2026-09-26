@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { VillageScene } from './scenes/VillageScene';
 import { CharacterCreationScene } from './scenes/CharacterCreationScene';
+import { BuildingInteriorScene } from './scenes/BuildingInteriorScene';
 
 export const GAME_CONFIG: Phaser.Types.Core.GameConfig = {
   type: Phaser.AUTO,
@@ -15,7 +16,7 @@ export const GAME_CONFIG: Phaser.Types.Core.GameConfig = {
       debug: false
     }
   },
-  scene: [CharacterCreationScene, VillageScene],
+  scene: [CharacterCreationScene, VillageScene, BuildingInteriorScene],
   scale: {
     mode: Phaser.Scale.FIT,
     autoCenter: Phaser.Scale.CENTER_BOTH,
@@ -41,4 +42,12 @@ export const INTERACTION_RADIUS = 50;
 export const WORLD_BOUNDS = {
   width: 1200,
   height: 900
+};
+
+export const MAPS = {
+  village: { width: 1200, height: 900, spawnPoint: { x: 480, y: 360 } },
+  north_farm: { width: 1200, height: 900, spawnPoint: { x: 380, y: 160 } },
+  east_riverside: { width: 1200, height: 900, spawnPoint: { x: 100, y: 450 } },
+  south_dock: { width: 1200, height: 900, spawnPoint: { x: 600, y: 700 } },
+  whispering_woods: { width: 1200, height: 900, spawnPoint: { x: 100, y: 450 } },
 };

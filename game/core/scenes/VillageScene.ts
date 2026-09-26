@@ -1,8 +1,10 @@
 import Phaser from 'phaser';
 import type { CharacterCustomization, PlayerState, Direction, Vector2, NetworkPlayer } from '@shared/types';
-import { villageMap, getObjectsAtPosition } from '@data/world/objects';
+import { villageMap, getObjectsAtPosition, worldMaps } from '@data/world/objects';
 import { npcs, getNpcsAtPosition } from '@data/npcs';
 import { WORLD_BOUNDS, PLAYER_SPEED, INTERACTION_RADIUS } from '../GameConfig';
+import { getGameTime } from '@backend/time/clock';
+import { getCurrentWeather } from '@backend/weather/weatherSystem';
 
 interface PlayerSprite extends Phaser.GameObjects.Container {
   body: Phaser.Physics.Arcade.Body;
@@ -28,6 +30,10 @@ export class VillageScene extends Phaser.Scene {
   private dialogueUI: Phaser.GameObjects.Container | null = null;
   private sitTarget: Phaser.GameObjects.GameObject | null = null;
   private emitter?: Phaser.Events.EventEmitter;
+  private lightingOverlay!: Phaser.GameObjects.Rectangle;
+  private currentWeatherType: string = 'clear';
+  private dayNightCycleTimer!: Phaser.Time.TimerEvent;
+  private activeWeatherEmitters: Phaser.GameObjects.GameObject[] = [];
 
   constructor() {
     super({ key: 'VillageScene' });
@@ -42,6 +48,12 @@ export class VillageScene extends Phaser.Scene {
   create() {
     // Create world bounds
     this.physics.world.setBounds(0, 0, WORLD_BOUNDS.width, WORLD_BOUNDS.height);
+
+    // Create lighting overlay for day/night cycle
+    this.lightingOverlay = this.add.rectangle(0, 0, WORLD_BOUNDS.width, WORLD_BOUNDS.height, 0x000000, 0);
+    this.lightingOverlay.setOrigin(0, 0);
+    this.lightingOverlay.setScrollFactor(0);
+    this.lightingOverlay.setDepth(999);
 
     // Create ground layer
     this.createGround();
@@ -64,10 +76,107 @@ export class VillageScene extends Phaser.Scene {
     // Create UI elements
     this.createUI();
 
+    // Start day/night cycle visual update
+    this.startDayNightVisuals();
+
     // Listen for network events
     if (this.emitter) {
       this.setupNetworkListeners();
     }
+  }
+
+  private startDayNightVisuals() {
+    this.updateLighting();
+    this.dayNightCycleTimer = this.time.addEvent({
+      delay: 1000,
+      callback: this.updateLighting,
+      callbackScope: this,
+      loop: true
+    });
+  }
+
+  private updateLighting() {
+    const gameTime = getGameTime();
+    const hour = gameTime.hour;
+    const minute = gameTime.minute;
+    const totalMinutes = hour * 60 + minute;
+
+    let targetAlpha = 0;
+    let overlayColor = 0x000000;
+
+    if (hour >= 5 && hour < 7) {
+      const progress = (totalMinutes - 5 * 60) / (2 * 60);
+      targetAlpha = Phaser.Math.Clamp(0.4 - progress * 0.4, 0, 0.4);
+      overlayColor = 0x1a1a2e;
+    } else if (hour >= 7 && hour < 17) {
+      targetAlpha = 0;
+    } else if (hour >= 17 && hour < 19) {
+      const progress = (totalMinutes - 17 * 60) / (2 * 60);
+      targetAlpha = Phaser.Math.Clamp(progress * 0.4, 0, 0.4);
+      overlayColor = 0x1a1a2e;
+    } else if (hour >= 19 && hour < 22) {
+      const progress = (totalMinutes - 19 * 60) / (3 * 60);
+      targetAlpha = Phaser.Math.Clamp(0.4 + progress * 0.3, 0.4, 0.7);
+      overlayColor = 0x0d0d1a;
+    } else {
+      targetAlpha = 0.7;
+      overlayColor = 0x050510;
+    }
+
+    this.lightingOverlay.setFillStyle(overlayColor, targetAlpha);
+
+    this.updateWeatherEffects();
+  }
+
+  private updateWeatherEffects() {
+    const weather = getCurrentWeather();
+    
+    // Clean up previous weather emitters
+    this.activeWeatherEmitters.forEach(emitter => emitter.destroy());
+    this.activeWeatherEmitters = [];
+
+    if (weather.type === 'rain' || weather.type === 'heavy_rain') {
+      this.createRainEffect(weather.type === 'heavy_rain');
+      this.lightingOverlay.setFillStyle(this.lightingOverlay.fillColor, this.lightingOverlay.fillAlpha + 0.1);
+    } else if (weather.type === 'fog') {
+      this.createFogEffect();
+    } else if (weather.type === 'cloudy') {
+      this.lightingOverlay.setFillStyle(this.lightingOverlay.fillColor, this.lightingOverlay.fillAlpha + 0.05);
+    }
+  }
+
+  private createRainEffect(heavy: boolean) {
+    const emitter = this.add.particles(0, 0, '__DEFAULT', {
+      x: { min: 0, max: WORLD_BOUNDS.width },
+      y: -50,
+      lifespan: 1000,
+      speedY: { min: 400, max: 600 },
+      speedX: { min: -50, max: 50 },
+      scale: { start: 0.3, end: 0 },
+      alpha: { start: 0.4, end: 0 },
+      tint: 0x88ccff,
+      quantity: heavy ? 20 : 10,
+      frequency: heavy ? 50 : 100,
+      blendMode: 'ADD'
+    });
+    emitter.setDepth(1000);
+    this.activeWeatherEmitters.push(emitter as unknown as Phaser.GameObjects.Particles.ParticleEmitter);
+  }
+
+  private createFogEffect() {
+    const fog = this.add.rectangle(0, 0, WORLD_BOUNDS.width, WORLD_BOUNDS.height, 0xcccccc, 0.15);
+    fog.setOrigin(0, 0);
+    fog.setDepth(998);
+    fog.setScrollFactor(0);
+
+    this.tweens.add({
+      targets: fog,
+      alpha: { from: 0.15, to: 0.35 },
+      duration: 5000,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut'
+    });
   }
 
   private createGround() {
@@ -451,6 +560,25 @@ export class VillageScene extends Phaser.Scene {
     this.emitter.on('player_move', (data: Partial<NetworkPlayer> & { id: string }) => {
       this.updateOtherPlayer(data);
     });
+
+    this.emitter.on('clock_tick', (timeData: { hour: number; minute: number; period: string }) => {
+      this.updateLighting();
+    });
+
+    this.emitter.on('enter_building', (data: { buildingId: string; interiorName: string; spawnPoint: { x: number; y: number } }) => {
+      this.scene.start('BuildingInteriorScene', {
+        customization: this.playerCustomization,
+        buildingId: data.buildingId,
+        emitter: this.emitter
+      });
+    });
+
+    this.emitter.on('map_change', (data: { mapId: string; spawnPoint: { x: number; y: number } }) => {
+      this.scene.restart({
+        customization: this.playerCustomization,
+        emitter: this.emitter
+      });
+    });
   }
 
   private addOtherPlayer(player: NetworkPlayer) {
@@ -506,6 +634,7 @@ export class VillageScene extends Phaser.Scene {
 
     this.handleMovement();
     this.checkInteractions();
+    this.checkBuildingEntry();
   }
 
   private handleMovement() {
@@ -672,5 +801,37 @@ export class VillageScene extends Phaser.Scene {
         state: this.playerState
       });
     }
+  }
+
+  private checkBuildingEntry() {
+    const playerPos = { x: this.player.x, y: this.player.y };
+
+    const nearbyObjects = this.worldObjects.filter(obj => {
+      const container = obj as Phaser.GameObjects.Container;
+      const objX = container.x || 0;
+      const objY = container.y || 0;
+      const dx = objX - playerPos.x;
+      const dy = objY - playerPos.y;
+      return Math.sqrt(dx * dx + dy * dy) <= INTERACTION_RADIUS;
+    });
+
+    for (const obj of nearbyObjects) {
+      const objectType = obj.getData('objectType');
+      const interactions = obj.getData('interactions') || [];
+      
+      if (objectType === 'building' && interactions.length > 0) {
+        if (Phaser.Input.Keyboard.JustDown(this.interactionKey)) {
+          const buildingId = obj.getData('properties')?.building;
+          if (buildingId) {
+            this.enterBuilding(buildingId);
+          }
+          return;
+        }
+      }
+    }
+  }
+
+  private enterBuilding(buildingId: string) {
+    this.emitter?.emit('enter_building', { buildingId });
   }
 }
