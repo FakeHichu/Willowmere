@@ -3,7 +3,7 @@
 import { useState, useEffect, Suspense } from 'react';
 import { useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
-import type { CharacterCustomization } from '@shared/types';
+import type { CharacterCustomization, NetworkPlayer } from '@shared/types';
 import { DialogueUI } from '@frontend/components/DialogueUI';
 
 // Dynamically import the game canvas to avoid SSR issues
@@ -17,7 +17,10 @@ interface PlayerData {
   username: string;
   customization: CharacterCustomization;
   position: { x: number; y: number };
+  direction: string;
   currency: number;
+  inventory: { itemId: string; quantity: number }[];
+  quests: { questId: string; currentStepId: string | null; status: string; progress: Record<string, number> }[];
 }
 
 export default function PlayPage() {
@@ -28,6 +31,7 @@ export default function PlayPage() {
   const [gameTime, setGameTime] = useState<string>('Day 1, 08:00 AM');
   const [activeQuests, setActiveQuests] = useState<string[]>([]);
   const [inventory, setInventory] = useState<{ itemId: string; quantity: number }[]>([]);
+  const [otherPlayers, setOtherPlayers] = useState<NetworkPlayer[]>([]);
 
   // UI modal toggles
   const [showQuestLog, setShowQuestLog] = useState(false);
@@ -101,6 +105,10 @@ export default function PlayPage() {
     });
   };
 
+  const handlePlayersUpdate = (players: NetworkPlayer[]) => {
+    setOtherPlayers(players);
+  };
+
   const handleClockTick = (timeData: { timeString: string }) => {
     if (timeData?.timeString) {
       setGameTime(timeData.timeString);
@@ -131,9 +139,12 @@ export default function PlayPage() {
         >
           <GameCanvas
             customization={player.customization}
+            playerId={player.id}
+            username={player.username}
             onDialogueStart={handleDialogueStart}
             onItemPickup={handleItemPickup}
             onClockTick={handleClockTick}
+            onPlayersUpdate={handlePlayersUpdate}
           />
         </Suspense>
       </div>

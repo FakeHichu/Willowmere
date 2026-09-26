@@ -4,16 +4,27 @@ import { useEffect, useRef } from 'react';
 import Phaser from 'phaser';
 import { io, Socket } from 'socket.io-client';
 import { GAME_CONFIG } from '@game/core/GameConfig';
-import type { CharacterCustomization } from '@shared/types';
+import type { CharacterCustomization, NetworkPlayer, Vector2, Direction, PlayerState } from '@shared/types';
 
 interface GameCanvasProps {
   customization: CharacterCustomization;
+  playerId: string;
+  username: string;
   onDialogueStart?: (npcId: string) => void;
   onItemPickup?: (itemId: string, objectId: string) => void;
   onClockTick?: (timeData: { timeString: string }) => void;
+  onPlayersUpdate?: (players: NetworkPlayer[]) => void;
 }
 
-export function GameCanvas({ customization, onDialogueStart, onItemPickup, onClockTick }: GameCanvasProps) {
+export function GameCanvas({ 
+  customization, 
+  playerId, 
+  username, 
+  onDialogueStart, 
+  onItemPickup,
+  onClockTick,
+  onPlayersUpdate 
+}: GameCanvasProps) {
   const gameRef = useRef<Phaser.Game | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const emitterRef = useRef<Phaser.Events.EventEmitter | null>(null);
@@ -72,6 +83,32 @@ export function GameCanvas({ customization, onDialogueStart, onItemPickup, onClo
       emitterRef.current?.emit('map_change', data);
     });
 
+    // Player offline / position correction / chat
+    socketRef.current.on('player_offline', (playerId: string) => {
+      emitterRef.current?.emit('player_offline', playerId);
+    });
+
+    socketRef.current.on('player_position_correction', (data: { position: Vector2; direction: Direction; state: PlayerState }) => {
+      emitterRef.current?.emit('player_position_correction', data);
+    });
+
+    socketRef.current.on('existing_players', (players: NetworkPlayer[]) => {
+      if (onPlayersUpdate) {
+        onPlayersUpdate(players);
+      }
+      players.forEach(p => {
+        emitterRef.current?.emit('player_join', p);
+      });
+    });
+
+    socketRef.current.on('player_join', (player: NetworkPlayer) => {
+      emitterRef.current?.emit('player_join', player);
+    });
+
+    socketRef.current.on('player_leave', (playerId: string) => {
+      emitterRef.current?.emit('player_leave', playerId);
+    });
+
     // Forward local movements/inputs to Socket.IO server
     emitterRef.current.on('player_input', (inputData: unknown) => {
       socketRef.current?.emit('player_input', inputData);
@@ -90,6 +127,19 @@ export function GameCanvas({ customization, onDialogueStart, onItemPickup, onClo
       socketRef.current?.emit('change_map', data);
     });
 
+    // Movement input handling (from scene)
+    emitterRef.current.on('player_move_input', (data: { position: Vector2; direction: Direction; state: PlayerState; timestamp: number }) => {
+      if (socketRef.current?.connected) {
+        socketRef.current.emit('player_move_input', data);
+      }
+    });
+
+    emitterRef.current.on('player_interact', (data: { objectId: string; interactionType: string }) => {
+      if (socketRef.current?.connected) {
+        socketRef.current.emit('player_interact', data);
+      }
+    });
+
     // Initialize Phaser game
     const config: Phaser.Types.Core.GameConfig = {
       ...GAME_CONFIG,
@@ -99,11 +149,22 @@ export function GameCanvas({ customization, onDialogueStart, onItemPickup, onClo
           game.registry.set('customization', customization);
           game.registry.set('emitter', emitterRef.current);
           game.registry.set('socket', socketRef.current);
+          game.registry.set('playerId', playerId);
         },
       },
     };
 
     gameRef.current = new Phaser.Game(config);
+
+    // Join the game after connection
+    socketRef.current.on('connect', () => {
+      console.log('Socket connected:', socketRef.current?.id);
+      socketRef.current?.emit('player_join', {
+        playerId,
+        username,
+        customization,
+      });
+    });
 
     return () => {
       if (socketRef.current) {
@@ -135,7 +196,7 @@ export function GameCanvas({ customization, onDialogueStart, onItemPickup, onClo
         gameRef.current = null;
       }
     };
-  }, []);
+  }, [playerId, username, customization, onDialogueStart, onItemPickup, onClockTick, onPlayersUpdate]);
 
   return (
     <div

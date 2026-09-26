@@ -9,6 +9,7 @@ import { addInventoryItem } from '../inventory/inventoryService';
 import { getObjectById } from '@data/world/objects';
 import { getBuildingInterior } from '../buildings/buildingManager';
 import { MAPS } from '@game/core/GameConfig';
+import { getAuthenticatedUser } from '../auth/auth';
 
 interface ConnectedPlayer {
   id: string;
@@ -28,6 +29,91 @@ interface ConnectedPlayer {
 
 // In-memory active & offline player map
 const worldPlayers = new Map<string, ConnectedPlayer>();
+
+// Movement validation constants
+const WORLD_BOUNDS = { width: 1200, height: 900 };
+const PLAYER_SPEED = 150;
+
+// Simple collision objects (in production, load from shared data)
+const COLLISION_OBJECTS = [
+  { x: 320, y: 520, width: 160, height: 96 }, // pond
+  { x: 350, y: 280, width: 64, height: 32 }, // bench 1
+  { x: 450, y: 280, width: 64, height: 32 }, // bench 2
+  { x: 280, y: 480, width: 64, height: 32 }, // bench 3
+  { x: 400, y: 180, width: 48, height: 64 }, // notice board
+  { x: 100, y: 170, width: 24, height: 32 }, // mailbox 1
+  { x: 780, y: 370, width: 24, height: 32 }, // mailbox 2
+];
+
+function checkCollision(x: number, y: number, radius: number = 16): boolean {
+  // World bounds
+  if (x - radius < 0 || x + radius > WORLD_BOUNDS.width ||
+      y - radius < 0 || y + radius > WORLD_BOUNDS.height) {
+    return true;
+  }
+
+  // Object collisions
+  for (const obj of COLLISION_OBJECTS) {
+    const closestX = Math.max(obj.x, Math.min(x, obj.x + obj.width));
+    const closestY = Math.max(obj.y, Math.min(y, obj.y + obj.height));
+    const dx = x - closestX;
+    const dy = y - closestY;
+    if (dx * dx + dy * dy < radius * radius) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function validateMovement(
+  currentPos: Vector2,
+  newPos: Vector2,
+  direction: Direction,
+  timeDelta: number
+): { valid: boolean; position: Vector2 } {
+  const maxDistance = PLAYER_SPEED * (timeDelta / 1000) * 1.5; // Allow 50% buffer for latency
+  const dx = newPos.x - currentPos.x;
+  const dy = newPos.y - currentPos.y;
+  const distance = Math.sqrt(dx * dx + dy * dy);
+
+  if (distance > maxDistance) {
+    // Clamp to max distance
+    const ratio = maxDistance / distance;
+    return {
+      valid: false,
+      position: {
+        x: currentPos.x + dx * ratio,
+        y: currentPos.y + dy * ratio,
+      },
+    };
+  }
+
+  // Check collision at new position
+  if (checkCollision(newPos.x, newPos.y)) {
+    return { valid: false, position: currentPos };
+  }
+
+  return { valid: true, position: newPos };
+}
+
+// Broadcast to nearby players (interest management)
+function broadcastToNearby(io: SocketIOServer, player: ConnectedPlayer, event: string, data: unknown) {
+  const radius = 500; // Interest management radius
+  
+  worldPlayers.forEach((otherPlayer, otherId) => {
+    if (otherId === player.id) return;
+    if (!otherPlayer.isOnline) return;
+
+    const dx = otherPlayer.position.x - player.position.x;
+    const dy = otherPlayer.position.y - player.position.y;
+    const distance = Math.sqrt(dx * dx + dy * dy);
+
+    if (distance <= radius) {
+      io.to(otherPlayer.socketId).emit(event, data);
+    }
+  });
+}
 
 export function initializeSocketServer(httpServer: HttpServer) {
   const io = new SocketIOServer(httpServer, {
@@ -142,6 +228,8 @@ export function initializeSocketServer(httpServer: HttpServer) {
         lastUpdate: player.lastUpdate,
         isOnline: true,
       });
+
+      console.log(`Player ${data.username} joined at ${initialPos.x}, ${initialPos.y}`);
     });
 
     // Handle SERVER-AUTHORITATIVE Movement Input
@@ -180,6 +268,43 @@ export function initializeSocketServer(httpServer: HttpServer) {
         });
       }
     );
+
+    // Handle player movement input (server-authoritative with validation)
+    socket.on('player_move_input', (data: { position: Vector2; direction: Direction; state: PlayerState; timestamp: number }) => {
+      if (!currentPlayerId) return;
+      const player = worldPlayers.get(currentPlayerId);
+      if (!player) return;
+
+      const now = Date.now();
+      const timeDelta = now - player.lastUpdate;
+
+      // Validate movement with collision detection
+      const validation = validateMovement(player.position, data.position, data.direction, timeDelta);
+
+      // Update player state with validated position
+      player.position = validation.position;
+      player.targetPosition = validation.position;
+      player.direction = data.direction;
+      player.state = data.state;
+      player.lastUpdate = now;
+
+      // Send correction back to originating player (server-authoritative position)
+      socket.emit('player_position_correction', {
+        position: player.position,
+        direction: player.direction,
+        state: player.state,
+      });
+
+      // Broadcast to other players in range (interest management)
+      broadcastToNearby(io, player, 'player_move', {
+        id: player.id,
+        position: player.position,
+        targetPosition: player.targetPosition,
+        direction: player.direction,
+        state: player.state,
+        lastUpdate: player.lastUpdate,
+      });
+    });
 
     // Fallback legacy handler for position sync reconciliation
     socket.on('player_move', (data: { position: Vector2; direction: Direction; state: PlayerState }) => {
@@ -229,8 +354,8 @@ export function initializeSocketServer(httpServer: HttpServer) {
         }
       }
 
-      // Broadcast generic interaction to nearby clients
-      socket.broadcast.emit('player_interact', {
+      // Broadcast interaction to nearby players
+      broadcastToNearby(io, player, 'player_interact', {
         playerId: currentPlayerId,
         objectId: data.objectId,
         interactionType: data.interactionType,
@@ -318,9 +443,6 @@ export function initializeSocketServer(httpServer: HttpServer) {
       if (currentPlayerId) {
         const player = worldPlayers.get(currentPlayerId);
         if (player) {
-          player.isOnline = false;
-          player.state = 'idle';
-
           // Persist position to PostgreSQL on disconnect
           try {
             await prisma.player.update({
@@ -336,7 +458,12 @@ export function initializeSocketServer(httpServer: HttpServer) {
             console.error('Failed to save disconnect position to DB:', e);
           }
 
-          // Notify clients that player is now offline (retains stationary representation)
+          // Mark as offline but keep in world
+          player.isOnline = false;
+          player.state = 'idle';
+          player.lastUpdate = Date.now();
+
+          // Notify others of player going offline
           io.emit('player_offline', {
             id: player.id,
             position: player.position,
@@ -356,6 +483,7 @@ export function initializeSocketServer(httpServer: HttpServer) {
 export function getNearbyPlayers(position: Vector2, radius: number = 250): NetworkPlayer[] {
   return Array.from(worldPlayers.values())
     .filter((player) => {
+      if (!player.isOnline) return false;
       const dx = player.position.x - position.x;
       const dy = player.position.y - position.y;
       return Math.sqrt(dx * dx + dy * dy) <= radius;
