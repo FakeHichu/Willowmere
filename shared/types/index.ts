@@ -52,7 +52,7 @@ export interface Player {
   updatedAt: Date;
 }
 
-export type PlayerState = 'idle' | 'walking' | 'sitting' | 'interacting';
+export type PlayerState = 'idle' | 'walking' | 'sprinting' | 'dodging' | 'sitting' | 'interacting';
 
 export type Direction = 'up' | 'down' | 'left' | 'right';
 

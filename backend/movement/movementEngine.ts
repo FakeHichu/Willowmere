@@ -1,5 +1,6 @@
 import type { Vector2, Direction, PlayerState } from '@shared/types';
-import { worldObjects, villageMap } from '@data/world/objects';
+import { worldObjects, overworldMap } from '@data/world/objects';
+import { WORLD_BOUNDS } from '@shared/constants';
 
 export const PLAYER_SPEED = 160; // Pixels per second
 export const MAX_STEP_TIME = 0.1; // 100ms max delta per movement tick
@@ -19,9 +20,9 @@ export function checkWorldCollision(pos: Vector2): boolean {
   // Map boundary check
   if (
     pos.x < 32 ||
-    pos.x > villageMap.width - 32 ||
+    pos.x > WORLD_BOUNDS.width - 32 ||
     pos.y < 32 ||
-    pos.y > villageMap.height - 32
+    pos.y > WORLD_BOUNDS.height - 32
   ) {
     return true;
   }

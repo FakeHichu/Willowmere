@@ -8,7 +8,7 @@ import { updateNPCSchedules } from '../npc/npcEngine';
 import { addInventoryItem } from '../inventory/inventoryService';
 import { getObjectById } from '@data/world/objects';
 import { getBuildingInterior } from '../buildings/buildingManager';
-import { MAPS } from '@game/core/GameConfig';
+import { MAPS, WORLD_BOUNDS, PLAYER_SPEED } from '@shared/constants';
 import { getAuthenticatedUser } from '../auth/auth';
 
 interface ConnectedPlayer {
@@ -29,10 +29,6 @@ interface ConnectedPlayer {
 
 // In-memory active & offline player map
 const worldPlayers = new Map<string, ConnectedPlayer>();
-
-// Movement validation constants
-const WORLD_BOUNDS = { width: 1200, height: 900 };
-const PLAYER_SPEED = 150;
 
 // Simple collision objects (in production, load from shared data)
 const COLLISION_OBJECTS = [

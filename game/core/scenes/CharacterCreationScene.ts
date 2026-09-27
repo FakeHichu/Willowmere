@@ -16,6 +16,13 @@ export class CharacterCreationScene extends Phaser.Scene {
   }
 
   create() {
+    // Check if we already have customization data (prevent double entry)
+    const existingCustomization = this.game.registry.get('customization');
+    if (existingCustomization) {
+      this.scene.start('VillageScene', { customization: existingCustomization });
+      return;
+    }
+
     // Background
     this.cameras.main.setBackgroundColor('#f5f0e6');
 
@@ -456,5 +463,11 @@ export class CharacterCreationScene extends Phaser.Scene {
     this.scene.start('VillageScene', {
       customization: this.currentCustomization
     });
+  }
+
+  shutdown() {
+    // Clean up any timers or event listeners
+    this.tweens.killAll();
+    this.children.removeAll(true);
   }
 }

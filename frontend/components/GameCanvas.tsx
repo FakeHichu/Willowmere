@@ -34,12 +34,21 @@ export function GameCanvas({
     if (!containerRef.current || gameRef.current) return;
 
     // Connect Socket.IO
-    socketRef.current = io(process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000', {
+    socketRef.current = io(process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:3002', {
       withCredentials: true,
+      reconnection: true,
+      reconnectionAttempts: 5,
+      reconnectionDelay: 1000,
     });
 
     // Create event emitter for Phaser communication
     emitterRef.current = new Phaser.Events.EventEmitter();
+
+    // Prevent multiple game instances in React StrictMode
+    if (gameRef.current) {
+      console.log('[GameCanvas] Game already exists, skipping creation');
+      return;
+    }
 
     if (onDialogueStart) {
       emitterRef.current.on('start_dialogue', (data: { npcId: string }) => {

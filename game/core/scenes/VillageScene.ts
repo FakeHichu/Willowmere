@@ -1,10 +1,20 @@
 import Phaser from 'phaser';
 import type { CharacterCustomization, PlayerState, Direction, Vector2, NetworkPlayer } from '@shared/types';
-import { villageMap, getObjectsAtPosition, worldMaps } from '@data/world/objects';
-import { npcs, getNpcsAtPosition } from '@data/npcs';
 import { WORLD_BOUNDS, PLAYER_SPEED, INTERACTION_RADIUS } from '../GameConfig';
 import { getGameTime } from '@backend/time/clock';
-import { getCurrentWeather } from '@backend/weather/weatherSystem';
+import { npcs, getNpcsAtPosition } from '@data/npcs';
+import {
+  WorldRenderer,
+  RegionManager,
+  WorldCollision,
+  WorldInteractionManager,
+  Minimap,
+  WorldMapUI,
+  RegionChangeEvent,
+  AtmosphereManager,
+  AudioManager,
+} from '../world';
+import { DynamicCamera } from '../world/DynamicCamera';
 
 interface PlayerSprite extends Phaser.GameObjects.Container {
   body: Phaser.Physics.Arcade.Body;
@@ -15,7 +25,6 @@ interface NPCSprite extends Phaser.GameObjects.Container {
   body: Phaser.Physics.Arcade.Body;
 }
 
-// Network player with interpolation data
 interface InterpolatedPlayer extends NetworkPlayer {
   sprite?: Phaser.GameObjects.Container;
   renderPosition: Vector2;
@@ -33,23 +42,42 @@ export class VillageScene extends Phaser.Scene {
   private interactionKey!: Phaser.Input.Keyboard.Key;
   private playerCustomization: CharacterCustomization;
   private otherPlayers: Map<string, InterpolatedPlayer> = new Map();
-  private npcs: NPCSprite[] = [];
-  private worldObjects: Phaser.GameObjects.GameObject[] = [];
-  private interactionPrompt: Phaser.GameObjects.Container | null = null;
-  private dialogueUI: Phaser.GameObjects.Container | null = null;
-  private sitTarget: Phaser.GameObjects.GameObject | null = null;
+  private npcSprites: NPCSprite[] = [];
   private emitter?: Phaser.Events.EventEmitter;
 
-  // Day/night & weather
-  private lightingOverlay!: Phaser.GameObjects.Rectangle;
-  private currentWeatherType: string = 'clear';
-  private dayNightCycleTimer!: Phaser.Time.TimerEvent;
-  private activeWeatherEmitters: Phaser.GameObjects.Particles.ParticleEmitter[] = [];
+  
 
-  // Client-side prediction & reconciliation
   private predictedPosition: Vector2 = { x: 0, y: 0 };
   private lastServerPosition: Vector2 = { x: 0, y: 0 };
   private movementBuffer: Array<{ position: Vector2; direction: Direction; state: PlayerState; timestamp: number }> = [];
+
+  private worldRenderer!: WorldRenderer;
+  private regionManager!: RegionManager;
+  private worldCollision!: WorldCollision;
+  private interactionManager!: WorldInteractionManager;
+  private minimap!: Minimap;
+  private worldMapUI!: WorldMapUI;
+  private dynamicCamera!: DynamicCamera;
+  private atmosphereManager!: AtmosphereManager;
+  private audioManager!: AudioManager;
+  private hudElements!: {
+    playerPanel: Phaser.GameObjects.Container;
+    clockPanel: Phaser.GameObjects.Container;
+    coordPanel: Phaser.GameObjects.Container;
+    playerNameText: Phaser.GameObjects.Text;
+    clockText: Phaser.GameObjects.Text;
+    regionText: Phaser.GameObjects.Text;
+    coordText: Phaser.GameObjects.Text;
+  };
+
+  // Advanced movement
+  private sprintKey!: Phaser.Input.Keyboard.Key;
+  private dodgeKey!: Phaser.Input.Keyboard.Key;
+  private isSprinting = false;
+  private isDodging = false;
+  private dodgeCooldown = 0;
+  private lastDodgeTime = 0;
+  private dodgeDirection: Direction = 'down';
 
   constructor() {
     super({ key: 'VillageScene' });
@@ -57,369 +85,59 @@ export class VillageScene extends Phaser.Scene {
   }
 
   init(data: { customization: CharacterCustomization; emitter?: Phaser.Events.EventEmitter; playerId?: string; username?: string }) {
-    this.playerCustomization = data.customization || {};
-    this.emitter = data.emitter;
+    this.playerCustomization = data.customization || this.game.registry.get('customization') || {} as CharacterCustomization;
+    
+    // Redirect to character creation if no customization data
+    if (!this.playerCustomization.skinTone) {
+      this.scene.start('CharacterCreationScene');
+      return;
+    }
+    
+    // Get emitter from data or from game registry (set in preBoot)
+    this.emitter = data.emitter || this.game.registry.get('emitter');
   }
 
-  create() {
-    // Create world bounds
+  async create() {
     this.physics.world.setBounds(0, 0, WORLD_BOUNDS.width, WORLD_BOUNDS.height);
 
-    // Create lighting overlay for day/night cycle
-    this.lightingOverlay = this.add.rectangle(0, 0, WORLD_BOUNDS.width, WORLD_BOUNDS.height, 0x000000, 0);
-    this.lightingOverlay.setOrigin(0, 0);
-    this.lightingOverlay.setScrollFactor(0);
-    this.lightingOverlay.setDepth(999);
+    this.worldRenderer = new WorldRenderer(this);
+    await this.worldRenderer.create();
 
-    // Create ground layer
-    this.createGround();
+    this.regionManager = new RegionManager(this, this.emitter!);
+    this.regionManager.create();
 
-    // Create world objects
-    this.createWorldObjects();
+    this.worldCollision = new WorldCollision(this);
+    this.worldCollision.create();
 
-    // Create NPCs
+    this.interactionManager = new WorldInteractionManager(this, this.emitter!);
+    this.interactionManager.create();
+
+    this.minimap = new Minimap(this);
+    this.minimap.create();
+
+    this.worldMapUI = new WorldMapUI(this);
+    this.worldMapUI.create();
+
+    this.atmosphereManager = new AtmosphereManager(this);
+    this.atmosphereManager.create();
+
     this.createNPCs();
-
-    // Create player at spawn point (will be corrected by server)
-    this.createPlayer();
-
-    // Setup camera
+this.createPlayer();
     this.setupCamera();
-
-    // Setup controls
     this.setupControls();
-
-    // Create UI elements
     this.createUI();
-
-    // Start day/night cycle visual update
-    this.startDayNightVisuals();
-
-    // Listen for network events
-    if (this.emitter) {
-      this.setupNetworkListeners();
-    }
+    // AtmosphereManager handles lighting/day-night now
+    // this.startDayNightVisuals();
+    this.audioManager = new AudioManager(this);
+    this.audioManager.create();
+    this.setupNetworkListeners();
+    this.syncDiscoveredState();
   }
 
-  private startDayNightVisuals() {
-    this.updateLighting();
-    this.dayNightCycleTimer = this.time.addEvent({
-      delay: 1000,
-      callback: this.updateLighting,
-      callbackScope: this,
-      loop: true
-    });
-  }
-
-  private updateLighting() {
-    const gameTime = getGameTime();
-    const hour = gameTime.hour;
-    const minute = gameTime.minute;
-    const totalMinutes = hour * 60 + minute;
-
-    let targetAlpha = 0;
-    let overlayColor = 0x000000;
-
-    if (hour >= 5 && hour < 7) {
-      const progress = (totalMinutes - 5 * 60) / (2 * 60);
-      targetAlpha = Phaser.Math.Clamp(0.4 - progress * 0.4, 0, 0.4);
-      overlayColor = 0x1a1a2e;
-    } else if (hour >= 7 && hour < 17) {
-      targetAlpha = 0;
-    } else if (hour >= 17 && hour < 19) {
-      const progress = (totalMinutes - 17 * 60) / (2 * 60);
-      targetAlpha = Phaser.Math.Clamp(progress * 0.4, 0, 0.4);
-      overlayColor = 0x1a1a2e;
-    } else if (hour >= 19 && hour < 22) {
-      const progress = (totalMinutes - 19 * 60) / (3 * 60);
-      targetAlpha = Phaser.Math.Clamp(0.4 + progress * 0.3, 0.4, 0.7);
-      overlayColor = 0x0d0d1a;
-    } else {
-      targetAlpha = 0.7;
-      overlayColor = 0x050510;
-    }
-
-    this.lightingOverlay.setFillStyle(overlayColor, targetAlpha);
-
-    this.updateWeatherEffects();
-  }
-
-  private updateWeatherEffects() {
-    const weather = getCurrentWeather();
-    
-    // Clean up previous weather emitters
-    this.activeWeatherEmitters.forEach(emitter => emitter.destroy());
-    this.activeWeatherEmitters = [];
-
-    if (weather.type === 'rain' || weather.type === 'heavy_rain') {
-      this.createRainEffect(weather.type === 'heavy_rain');
-      this.lightingOverlay.setFillStyle(this.lightingOverlay.fillColor, this.lightingOverlay.fillAlpha + 0.1);
-    } else if (weather.type === 'fog') {
-      this.createFogEffect();
-    } else if (weather.type === 'cloudy') {
-      this.lightingOverlay.setFillStyle(this.lightingOverlay.fillColor, this.lightingOverlay.fillAlpha + 0.05);
-    }
-  }
-
-  private createRainEffect(heavy: boolean) {
-    const emitter = this.add.particles(0, 0, '__DEFAULT', {
-      x: { min: 0, max: WORLD_BOUNDS.width },
-      y: -50,
-      lifespan: 1000,
-      speedY: { min: 400, max: 600 },
-      speedX: { min: -50, max: 50 },
-      scale: { start: 0.3, end: 0 },
-      alpha: { start: 0.4, end: 0 },
-      tint: 0x88ccff,
-      quantity: heavy ? 20 : 10,
-      frequency: heavy ? 50 : 100,
-      blendMode: 'ADD'
-    });
-    emitter.setDepth(1000);
-    this.activeWeatherEmitters.push(emitter as unknown as Phaser.GameObjects.Particles.ParticleEmitter);
-  }
-
-  private createFogEffect() {
-    const fog = this.add.rectangle(0, 0, WORLD_BOUNDS.width, WORLD_BOUNDS.height, 0xcccccc, 0.15);
-    fog.setOrigin(0, 0);
-    fog.setDepth(998);
-    fog.setScrollFactor(0);
-
-    this.tweens.add({
-      targets: fog,
-      alpha: { from: 0.15, to: 0.35 },
-      duration: 5000,
-      yoyo: true,
-      repeat: -1,
-      ease: 'Sine.easeInOut'
-    });
-  }
-
-  private createGround() {
-    // Create a simple grass background
-    const graphics = this.add.graphics();
-    graphics.fillStyle(0x7cb342, 1); // Warm grass green
-    graphics.fillRect(0, 0, WORLD_BOUNDS.width, WORLD_BOUNDS.height);
-
-    // Add some texture variation
-    for (let i = 0; i < 200; i++) {
-      const x = Phaser.Math.Between(0, WORLD_BOUNDS.width);
-      const y = Phaser.Math.Between(0, WORLD_BOUNDS.height);
-      const alpha = Phaser.Math.FloatBetween(0.1, 0.3);
-      graphics.fillStyle(0x558b2f, alpha);
-      graphics.fillCircle(x, y, Phaser.Math.Between(2, 8));
-    }
-
-    // Add paths
-    graphics.fillStyle(0x8d6e63, 1); // Dirt path color
-    // Main path through village
-    graphics.fillRect(50, 250, 700, 40);
-    graphics.fillRect(380, 50, 40, 400);
-    graphics.fillRect(380, 450, 200, 40);
-
-    // Path details
-    for (let i = 0; i < 100; i++) {
-      const x = Phaser.Math.Between(50, 750);
-      const y = Phaser.Math.Between(250, 290);
-      graphics.fillStyle(0x795548, 0.3);
-      graphics.fillCircle(x, y, Phaser.Math.Between(1, 3));
-    }
-  }
-
-  private createWorldObjects() {
-    // Create visual representations of world objects
-    villageMap.objects.forEach(obj => {
-      const container = this.add.container(obj.position.x, obj.position.y);
-
-      let sprite: Phaser.GameObjects.GameObject;
-
-      switch (obj.type) {
-        case 'bench':
-          sprite = this.createBenchSprite(obj.position.x, obj.position.y);
-          break;
-        case 'flower':
-          sprite = this.createFlowerSprite(obj.position.x, obj.position.y, obj.sprite);
-          break;
-        case 'pond':
-          sprite = this.createPondSprite(obj.position.x, obj.position.y, obj.size);
-          break;
-        case 'notice_board':
-          sprite = this.createNoticeBoardSprite(obj.position.x, obj.position.y);
-          break;
-        case 'door':
-          sprite = this.createDoorSprite(obj.position.x, obj.position.y);
-          break;
-        case 'mailbox':
-          sprite = this.createMailboxSprite(obj.position.x, obj.position.y);
-          break;
-        case 'garden_plot':
-          sprite = this.createGardenPlotSprite(obj.position.x, obj.position.y);
-          break;
-        case 'item_pickup':
-          sprite = this.createItemSprite(obj.position.x, obj.position.y, obj.sprite);
-          break;
-        default:
-          sprite = this.add.rectangle(obj.position.x, obj.position.y, obj.size.x, obj.size.y, 0x8b4513);
-      }
-
-      // Add collision if needed
-      if (obj.collision) {
-        const hitbox = this.add.rectangle(0, 0, obj.size.x, obj.size.y, 0x000000, 0) as Phaser.GameObjects.Rectangle;
-        this.physics.add.existing(hitbox, true);
-        container.add(hitbox);
-
-        if (this.player) {
-          this.physics.add.collider(this.player, hitbox);
-        }
-      }
-
-      // Store reference for interactions
-      container.setData('objectId', obj.id);
-      container.setData('objectType', obj.type);
-      container.setData('interactions', obj.interactions);
-      container.setData('properties', obj.properties);
-
-      this.worldObjects.push(container);
-    });
-  }
-
-  private createBenchSprite(x: number, y: number): Phaser.GameObjects.Rectangle {
-    const bench = this.add.rectangle(x, y, 64, 32, 0x8b4513);
-    const legs = this.add.rectangle(x, y + 12, 56, 8, 0x5d4037);
-    const seat = this.add.rectangle(x, y - 4, 64, 8, 0xa1887f);
-
-    return bench;
-  }
-
-  private createFlowerSprite(x: number, y: number, type: string): Phaser.GameObjects.Container {
-    const container = this.add.container(x, y);
-    const colors: Record<string, number> = {
-      'flower_wildflower': 0xff6b9d,
-      'flower_lavender': 0x9c27b0,
-      'flower_sunflower': 0xffc107
-    };
-
-    const color = colors[type] || 0xff6b9d;
-    const size = type === 'flower_sunflower' ? 16 : 12;
-
-    // Stem
-    const stem = this.add.rectangle(0, 8, 2, 16, 0x4caf50);
-    // Flower center
-    const center = this.add.circle(0, -4, size / 3, 0xffeb3b);
-    // Petals
-    for (let i = 0; i < 5; i++) {
-      const angle = (i / 5) * Math.PI * 2;
-      const petalX = Math.cos(angle) * size / 2;
-      const petalY = Math.sin(angle) * size / 2 - 4;
-      const petal = this.add.circle(petalX, petalY, size / 3, color);
-      container.add(petal);
-    }
-
-    container.add([stem, center]);
-    return container;
-  }
-
-  private createPondSprite(x: number, y: number, size: Vector2): Phaser.GameObjects.Container {
-    const container = this.add.container(x, y);
-
-    // Water
-    const water = this.add.ellipse(0, 0, size.x, size.y, 0x4fc3f7, 0.8);
-    // Reflection highlights
-    const highlight1 = this.add.ellipse(-30, -10, 40, 20, 0x81d4fa, 0.5);
-    const highlight2 = this.add.ellipse(20, 15, 30, 15, 0x81d4fa, 0.4);
-
-    // Water plants
-    const plant1 = this.add.ellipse(-60, 20, 20, 30, 0x66bb6a);
-    const plant2 = this.add.ellipse(55, -15, 25, 35, 0x4caf50);
-
-    container.add([water, highlight1, highlight2, plant1, plant2]);
-
-    // Add subtle animation
-    this.tweens.add({
-      targets: [highlight1, highlight2],
-      alpha: { from: 0.5, to: 0.7 },
-      duration: 2000,
-      yoyo: true,
-      repeat: -1
-    });
-
-    return container;
-  }
-
-  private createNoticeBoardSprite(x: number, y: number): Phaser.GameObjects.Container {
-    const container = this.add.container(x, y);
-
-    // Post
-    const post = this.add.rectangle(0, 20, 8, 50, 0x5d4037);
-    // Board
-    const board = this.add.rectangle(0, -10, 48, 40, 0x8d6e63);
-    const border = this.add.rectangle(0, -10, 52, 44, 0x5d4037);
-    border.setStrokeStyle(2, 0x3e2723);
-
-    container.add([border, board, post]);
-    return container;
-  }
-
-  private createDoorSprite(x: number, y: number): Phaser.GameObjects.Container {
-    const container = this.add.container(x, y);
-
-    const frame = this.add.rectangle(0, 0, 36, 52, 0x5d4037);
-    const door = this.add.rectangle(0, 0, 32, 48, 0x795548);
-    const handle = this.add.circle(10, 5, 3, 0xffc107);
-
-    container.add([frame, door, handle]);
-    return container;
-  }
-
-  private createMailboxSprite(x: number, y: number): Phaser.GameObjects.Container {
-    const container = this.add.container(x, y);
-
-    const post = this.add.rectangle(0, 10, 6, 30, 0x5d4037);
-    const box = this.add.rectangle(0, -8, 24, 16, 0xef5350);
-    const flag = this.add.rectangle(14, -8, 4, 10, 0xffc107);
-
-    container.add([post, box, flag]);
-    return container;
-  }
-
-  private createGardenPlotSprite(x: number, y: number): Phaser.GameObjects.Container {
-    const container = this.add.container(x, y);
-
-    // Soil
-    const soil = this.add.rectangle(0, 0, 48, 48, 0x6d4c41);
-    // Plants
-    for (let i = 0; i < 3; i++) {
-      for (let j = 0; j < 3; j++) {
-        const plantX = (i - 1) * 14;
-        const plantY = (j - 1) * 14;
-        const stem = this.add.rectangle(plantX, plantY, 2, 8, 0x4caf50);
-        const leaf = this.add.ellipse(plantX, plantY - 4, 6, 4, 0x66bb6a);
-        container.add([stem, leaf]);
-      }
-    }
-
-    return container;
-  }
-
-  private createItemSprite(x: number, y: number, sprite: string): Phaser.GameObjects.Container {
-    const container = this.add.container(x, y);
-
-    const item = this.add.rectangle(0, 0, 16, 16, 0x78909c);
-    const highlight = this.add.rectangle(-2, -2, 6, 6, 0xb0bec5);
-
-    container.add([item, highlight]);
-
-    // Add floating animation
-    this.tweens.add({
-      targets: container,
-      y: y - 3,
-      duration: 1000,
-      yoyo: true,
-      repeat: -1,
-      ease: 'Sine.easeInOut'
-    });
-
-    return container;
+  private syncDiscoveredState(): void {
+    const discoveredRegions = this.regionManager.getDiscoveredRegions();
+    this.minimap.setDiscoveredRegions(discoveredRegions);
+    this.worldMapUI.setDiscoveredRegions(discoveredRegions);
   }
 
   private createNPCs() {
@@ -427,21 +145,23 @@ export class VillageScene extends Phaser.Scene {
       const container = this.add.container(npcData.position.x, npcData.position.y) as NPCSprite;
       container.npcId = npcData.id;
 
-      // Create NPC sprite based on their role
       const colors: Record<string, number> = {
-        'npc_mabel': 0x4caf50,
-        'npc_rose': 0xffc107,
-        'npc_arthur': 0xff5722,
-        'npc_luna': 0x9c27b0
+        'npc_arthur': 0x4caf50,
+        'npc_elara': 0xffc107,
+        'npc_bram': 0xff5722,
+        'npc_lily': 0x9c27b0,
+        'npc_finn': 0x2196f3,
+        'npc_mira': 0x9c27b0,
+        'npc_tom': 0x795548,
+        'npc_nora': 0x00bcd4,
+        'npc_walter': 0x8d6e63,
+        'npc_sasha': 0xff9800,
       };
 
       const bodyColor = colors[npcData.id] || 0x9e9e9e;
 
-      // Body
       const body = this.add.rectangle(0, 0, 24, 32, bodyColor);
-      // Head
       const head = this.add.circle(0, -20, 12, 0xffd7ba);
-      // Name tag
       const nameText = this.add.text(0, -40, npcData.name, {
         fontSize: '12px',
         color: '#ffffff',
@@ -451,15 +171,13 @@ export class VillageScene extends Phaser.Scene {
 
       container.add([body, head, nameText]);
 
-      // Add physics
       this.physics.add.existing(container);
       container.body.setSize(24, 32);
       container.body.setOffset(-12, -16);
       (container.body as Phaser.Physics.Arcade.Body).setImmovable(true);
 
-      this.npcs.push(container);
+      this.npcSprites.push(container);
 
-      // Add idle animation
       this.tweens.add({
         targets: container,
         y: npcData.position.y - 2,
@@ -472,27 +190,21 @@ export class VillageScene extends Phaser.Scene {
   }
 
   private createPlayer() {
-    // Player will be positioned by server after join
-    // Start at spawn point as fallback
-    this.player = this.add.container(
-      villageMap.spawnPoint.x,
-      villageMap.spawnPoint.y
-    ) as PlayerSprite;
+    const spawnPoint = { x: 2000, y: 1750 };
 
-    this.predictedPosition = { x: villageMap.spawnPoint.x, y: villageMap.spawnPoint.y };
-    this.lastServerPosition = { x: villageMap.spawnPoint.x, y: villageMap.spawnPoint.y };
+    this.player = this.add.container(spawnPoint.x, spawnPoint.y) as PlayerSprite;
 
-    // Create player sprite based on customization
+    this.predictedPosition = { ...spawnPoint };
+    this.lastServerPosition = { ...spawnPoint };
+
     this.updatePlayerAppearance();
 
-    // Add physics
     this.physics.add.existing(this.player);
     this.player.body.setSize(24, 32);
     this.player.body.setOffset(-12, -16);
     this.player.body.setCollideWorldBounds(true);
 
-    // Add collision with NPCs
-    this.npcs.forEach(npc => {
+    this.npcSprites.forEach(npc => {
       this.physics.add.collider(this.player, npc);
     });
   }
@@ -500,17 +212,10 @@ export class VillageScene extends Phaser.Scene {
   private updatePlayerAppearance() {
     this.player.removeAll(true);
 
-    // Get colors from customization
     const skinTones: Record<string, number> = {
-      'skin_01': 0xffe4d0,
-      'skin_02': 0xf5d0b5,
-      'skin_03': 0xe8c4a2,
-      'skin_04': 0xd4a574,
-      'skin_05': 0xc4956a,
-      'skin_06': 0xa67c52,
-      'skin_07': 0x8b5a2b,
-      'skin_08': 0x6b4423,
-      'skin_09': 0x4a3021,
+      'skin_01': 0xffe4d0, 'skin_02': 0xf5d0b5, 'skin_03': 0xe8c4a2,
+      'skin_04': 0xd4a574, 'skin_05': 0xc4956a, 'skin_06': 0xa67c52,
+      'skin_07': 0x8b5a2b, 'skin_08': 0x6b4423, 'skin_09': 0x4a3021,
       'skin_10': 0x3d261a
     };
 
@@ -519,24 +224,27 @@ export class VillageScene extends Phaser.Scene {
     const bottomColor = Phaser.Display.Color.HexStringToColor(this.playerCustomization.bottomColor || '#8B4513').color;
     const hairColor = Phaser.Display.Color.HexStringToColor(this.playerCustomization.hairColor || '#6B4226').color;
 
-    // Legs
     const legs = this.add.rectangle(0, 12, 20, 16, bottomColor);
-    // Body
     const body = this.add.rectangle(0, 0, 24, 28, topColor);
-    // Head
     const head = this.add.circle(0, -18, 10, skinColor);
-    // Hair
     const hair = this.add.rectangle(0, -22, 22, 10, hairColor);
-    // Eyes
     const eyes = this.add.rectangle(0, -18, 8, 2, 0x000000);
 
     this.player.add([legs, body, head, hair, eyes]);
   }
 
   private setupCamera() {
-    this.cameras.main.startFollow(this.player, true, 0.1, 0.1);
-    this.cameras.main.setBounds(0, 0, WORLD_BOUNDS.width, WORLD_BOUNDS.height);
-    this.cameras.main.setZoom(1.5);
+    // Use dynamic camera system
+    this.dynamicCamera = new DynamicCamera(this, {
+      lerp: { x: 0.08, y: 0.08 },
+      deadzone: new Phaser.Geom.Rectangle(-40, -30, 80, 60),
+      zoom: 1.5,
+      minZoom: 0.9,
+      maxZoom: 2.5,
+      lookAhead: { x: 100, y: 80 },
+      bounds: new Phaser.Geom.Rectangle(0, 0, WORLD_BOUNDS.width, WORLD_BOUNDS.height),
+    });
+    this.dynamicCamera.setTarget(this.player);
   }
 
   private setupControls() {
@@ -549,22 +257,137 @@ export class VillageScene extends Phaser.Scene {
         D: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.D)
       };
       this.interactionKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.E);
+      this.sprintKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SHIFT);
+      this.dodgeKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
     }
   }
 
   private createUI() {
-    // Create HUD
     const hud = this.add.container(0, 0);
     hud.setScrollFactor(0);
     hud.setDepth(1000);
 
-    // Player name badge
-    const nameBadge = this.add.rectangle(20, 20, 120, 30, 0x000000aa);
-    const playerName = this.add.text(20, 20, 'Traveler', {
-      fontSize: '14px',
-      color: '#ffffff'
+    // Top-left: Player info panel
+    const playerPanel = this.createPlayerPanel();
+    hud.add(playerPanel);
+
+    // Top-center: Clock and region
+    const clockPanel = this.createClockPanel();
+    hud.add(clockPanel);
+
+    // Top-right: Minimap toggle hint (minimap is always visible now)
+    // Bottom-center: Coordinates and region info
+    const coordPanel = this.createCoordPanel();
+    hud.add(coordPanel);
+
+    // Store references for updates
+    this.hudElements = {
+      playerPanel,
+      clockPanel,
+      coordPanel,
+      playerNameText: playerPanel.getAt(2) as Phaser.GameObjects.Text,
+      clockText: clockPanel.getAt(1) as Phaser.GameObjects.Text,
+      regionText: clockPanel.getAt(2) as Phaser.GameObjects.Text,
+      coordText: coordPanel.getAt(1) as Phaser.GameObjects.Text,
+    };
+  }
+
+  private createPlayerPanel(): Phaser.GameObjects.Container {
+    const panel = this.add.container(20, 20);
+    panel.setScrollFactor(0);
+    panel.setDepth(1000);
+
+    // Panel background
+    const bg = this.add.rectangle(0, 0, 200, 50, 0x1a1a2e, 0.9);
+    bg.setOrigin(0, 0);
+    bg.setStrokeStyle(2, 0x8d6e63, 0.8);
+    bg.setInteractive();
+
+    // Player avatar circle
+    const avatar = this.add.circle(25, 25, 20, 0x8d6e63);
+    avatar.setStrokeStyle(2, 0xffd700, 1);
+
+    // Player name
+    const nameText = this.add.text(55, 12, 'Traveler', {
+      fontSize: '16px',
+      color: '#ffd700',
+      fontFamily: 'Georgia, serif',
+      fontStyle: 'bold',
+      stroke: '#000000',
+      strokeThickness: 2,
+    }).setOrigin(0, 0.5);
+
+    // Coins/currency
+    const coinText = this.add.text(55, 34, '💰 0', {
+      fontSize: '12px',
+      color: '#ffd700',
+      fontFamily: 'Georgia, serif',
+    }).setOrigin(0, 0.5);
+
+    panel.add([bg, avatar, nameText, coinText]);
+
+    // Hover effect
+    bg.on('pointerover', () => bg.setFillStyle(0x2a2a3e, 0.95));
+    bg.on('pointerout', () => bg.setFillStyle(0x1a1a2e, 0.9));
+
+    return panel;
+  }
+
+  private createClockPanel(): Phaser.GameObjects.Container {
+    const x = this.scale.width / 2;
+    const panel = this.add.container(x, 20);
+    panel.setScrollFactor(0);
+    panel.setDepth(1000);
+
+    const bg = this.add.rectangle(0, 0, 220, 40, 0x1a1a2e, 0.9);
+    bg.setStrokeStyle(2, 0x8d6e63, 0.8);
+    bg.setOrigin(0.5, 0);
+
+    // Clock icon
+    const clockIcon = this.add.text(-90, 0, '🕐', {
+      fontSize: '18px',
     }).setOrigin(0.5);
-    hud.add([nameBadge, playerName]);
+
+    // Time text
+    const timeText = this.add.text(-60, 0, 'Day 1, 08:00 AM', {
+      fontSize: '14px',
+      color: '#ffd700',
+      fontFamily: 'Georgia, serif',
+      fontStyle: 'bold',
+      stroke: '#000000',
+      strokeThickness: 2,
+    }).setOrigin(0, 0.5);
+
+    // Region text
+    const regionText = this.add.text(20, 0, 'Willowmere Village', {
+      fontSize: '12px',
+      color: '#aaaaaa',
+      fontFamily: 'Georgia, serif',
+    }).setOrigin(0, 0.5);
+
+    panel.add([bg, clockIcon, timeText, regionText]);
+    return panel;
+  }
+
+  private createCoordPanel(): Phaser.GameObjects.Container {
+    const x = this.scale.width / 2;
+    const y = this.scale.height - 30;
+    const panel = this.add.container(x, y);
+    panel.setScrollFactor(0);
+    panel.setDepth(1000);
+
+    const bg = this.add.rectangle(0, 0, 200, 28, 0x000000, 0.7);
+    bg.setStrokeStyle(1, 0x8d6e63, 0.5);
+    bg.setOrigin(0.5, 1);
+
+    const coordText = this.add.text(0, 0, 'X: 2000  Y: 1750', {
+      fontSize: '11px',
+      color: '#aaaaaa',
+      fontFamily: 'Georgia, serif',
+    }).setOrigin(0.5);
+
+    panel.add([bg, coordText]);
+    return panel;
   }
 
   private setupNetworkListeners() {
@@ -586,17 +409,10 @@ export class VillageScene extends Phaser.Scene {
       this.updateOtherPlayer(data);
     });
 
-    // Server-authoritative position correction
     this.emitter.on('player_position_correction', (data: { position: Vector2; direction: Direction; state: PlayerState }) => {
       this.reconcilePosition(data);
     });
 
-    // Day/night cycle sync
-    this.emitter.on('clock_tick', (timeData: { hour: number; minute: number; period: string }) => {
-      this.updateLighting();
-    });
-
-    // Building transitions
     this.emitter.on('enter_building', (data: { buildingId: string; interiorName: string; spawnPoint: { x: number; y: number } }) => {
       this.scene.start('BuildingInteriorScene', {
         customization: this.playerCustomization,
@@ -611,13 +427,38 @@ export class VillageScene extends Phaser.Scene {
         emitter: this.emitter
       });
     });
+
+    this.emitter.on('region_entered', (data: RegionChangeEvent) => {
+      if (data.currentRegion) {
+        this.minimap.discoverRegion(data.currentRegion.id);
+        this.worldMapUI.discoverRegion(data.currentRegion.id);
+        this.atmosphereManager.setRegion(data.currentRegion.id);
+      }
+    });
+
+    this.emitter.on('region_discovered', (data: { regionId: string }) => {
+      this.minimap.discoverRegion(data.regionId);
+      this.worldMapUI.discoverRegion(data.regionId);
+    });
+
+    this.emitter.on('request_region_travel', (data: { fromRegion: string; toRegion: string; entranceId: string }) => {
+      this.handleRegionTravel(data.fromRegion, data.toRegion, data.entranceId);
+    });
+  }
+
+  private handleRegionTravel(fromRegion: string, toRegion: string, entranceId: string) {
+    const entrance = this.regionManager.getEntrancePosition(entranceId);
+    if (entrance) {
+      this.player.setPosition(entrance.x, entrance.y);
+      this.predictedPosition = { ...entrance };
+      this.lastServerPosition = { ...entrance };
+      this.regionManager.forceRegion(toRegion);
+    }
   }
 
   private reconcilePosition(data: { position: Vector2; direction: Direction; state: PlayerState }) {
-    // Server sent authoritative position - reconcile with prediction
     this.lastServerPosition = data.position;
     
-    // Smooth correction - interpolate to server position
     this.tweens.add({
       targets: this.player,
       x: data.position.x,
@@ -647,7 +488,6 @@ export class VillageScene extends Phaser.Scene {
 
     const container = this.add.container(player.position.x, player.position.y);
 
-    // Simple player sprite
     const body = this.add.rectangle(0, 0, 24, 32, 0x4fc3f7);
     const head = this.add.circle(0, -20, 10, 0xffd7ba);
     const nameText = this.add.text(0, -35, player.username, {
@@ -657,7 +497,6 @@ export class VillageScene extends Phaser.Scene {
       padding: { x: 2, y: 1 }
     }).setOrigin(0.5);
 
-    // Offline indicator
     const offlineText = this.add.text(0, -50, '', {
       fontSize: '9px',
       color: '#ff9800',
@@ -689,7 +528,6 @@ export class VillageScene extends Phaser.Scene {
       offlineText.setText('[OFFLINE]');
       offlineText.setVisible(true);
     }
-    // Make sprite slightly transparent
     player.sprite.setAlpha(0.7);
   }
 
@@ -698,7 +536,6 @@ export class VillageScene extends Phaser.Scene {
     if (!player || !player.sprite) return;
 
     if (data.position) {
-      // Update target position for smooth interpolation
       player.targetPosition = data.position;
       player.lastUpdate = data.lastUpdate || Date.now();
     }
@@ -721,8 +558,8 @@ export class VillageScene extends Phaser.Scene {
   update() {
     if (!this.player || !this.player.body) return;
 
-    // Interpolate other players
     this.interpolateOtherPlayers();
+    this.updateHUD();
 
     if (this.playerState === 'sitting') {
       this.handleSitting();
@@ -730,27 +567,50 @@ export class VillageScene extends Phaser.Scene {
     }
 
     this.handleMovement();
-    this.checkInteractions();
-    this.checkBuildingEntry();
+    this.regionManager.update({ x: this.player.x, y: this.player.y });
+    this.worldCollision.update({ x: this.player.x, y: this.player.y });
+    this.interactionManager.update({ x: this.player.x, y: this.player.y });
+    this.minimap.update({ x: this.player.x, y: this.player.y }, this.direction);
+    this.worldMapUI.update({ x: this.player.x, y: this.player.y });
+    this.audioManager.update(this.game.loop.delta);
+  }
+
+  private updateHUD(): void {
+    if (!this.hudElements) return;
+
+    // Update clock
+    const gameTime = getGameTime();
+    const formattedHour = gameTime.hour % 12 === 0 ? 12 : gameTime.hour % 12;
+    const ampm = gameTime.hour >= 12 ? 'PM' : 'AM';
+    const minuteStr = gameTime.minute < 10 ? `0${gameTime.minute}` : `${gameTime.minute}`;
+    const timeStr = `Day ${gameTime.day}, ${formattedHour}:${minuteStr} ${ampm}`;
+    
+    this.hudElements.clockText.setText(timeStr);
+    
+    // Update region name
+    const currentRegion = this.regionManager.getCurrentRegion();
+    if (currentRegion) {
+      this.hudElements.regionText.setText(currentRegion.displayName);
+    }
+
+    // Update coordinates
+    this.hudElements.coordText.setText(`X: ${Math.round(this.player.x)}  Y: ${Math.round(this.player.y)}`);
   }
 
   private interpolateOtherPlayers() {
     this.otherPlayers.forEach((player) => {
       if (!player.sprite) return;
 
-      // Smooth interpolation towards target position
       const dx = player.targetPosition.x - player.renderPosition.x;
       const dy = player.targetPosition.y - player.renderPosition.y;
       const distance = Math.sqrt(dx * dx + dy * dy);
 
       if (distance > 1) {
-        // Move towards target
         const lerpFactor = 0.15;
         player.renderPosition.x += dx * lerpFactor;
         player.renderPosition.y += dy * lerpFactor;
         player.sprite.setPosition(player.renderPosition.x, player.renderPosition.y);
       } else {
-        // Snap to target if close
         player.renderPosition = { ...player.targetPosition };
         player.sprite.setPosition(player.targetPosition.x, player.targetPosition.y);
       }
@@ -758,51 +618,121 @@ export class VillageScene extends Phaser.Scene {
   }
 
   private handleMovement() {
-    const speed = PLAYER_SPEED;
-    let velocityX = 0;
-    let velocityY = 0;
+    const baseSpeed = PLAYER_SPEED;
+    const sprintSpeed = PLAYER_SPEED * 1.7;
+    const dodgeSpeed = PLAYER_SPEED * 3.5;
+    const acceleration = 1000;
+    const drag = 1400;
+    const dodgeCooldownMs = 800;
 
-    // Check WASD and Arrow keys
+    // Handle dodge cooldown
+    if (this.dodgeCooldown > 0) {
+      this.dodgeCooldown -= this.game.loop.delta;
+    }
+
+    let inputX = 0;
+    let inputY = 0;
+
+    // Determine input direction
     if (this.cursors.left.isDown || this.wasdKeys.A.isDown) {
-      velocityX = -speed;
+      inputX = -1;
       this.direction = 'left';
     } else if (this.cursors.right.isDown || this.wasdKeys.D.isDown) {
-      velocityX = speed;
+      inputX = 1;
       this.direction = 'right';
     }
 
     if (this.cursors.up.isDown || this.wasdKeys.W.isDown) {
-      velocityY = -speed;
-      this.direction = 'up';
+      inputY = -1;
+      if (inputX === 0) this.direction = 'up';
     } else if (this.cursors.down.isDown || this.wasdKeys.S.isDown) {
-      velocityY = speed;
-      this.direction = 'down';
+      inputY = 1;
+      if (inputX === 0) this.direction = 'down';
     }
 
-    // Normalize diagonal movement
-    if (velocityX !== 0 && velocityY !== 0) {
-      velocityX *= 0.707;
-      velocityY *= 0.707;
+    // Normalize diagonal
+    if (inputX !== 0 && inputY !== 0) {
+      const len = Math.sqrt(inputX * inputX + inputY * inputY);
+      inputX /= len;
+      inputY /= len;
     }
 
-    // Client-side prediction: move locally immediately
-    const newX = this.player.x + velocityX * (1/60); // Approximate frame time
-    const newY = this.player.y + velocityY * (1/60);
+    // Check for dodge roll (Space)
+    const now = Date.now();
+    const isDodgePressed = Phaser.Input.Keyboard.JustDown(this.dodgeKey);
+    const canDodge = this.dodgeCooldown <= 0 && (inputX !== 0 || inputY !== 0) && !this.isDodging;
+
+    if (isDodgePressed && canDodge) {
+      this.performDodge(inputX, inputY, dodgeSpeed, dodgeCooldownMs);
+      return; // Skip normal movement this frame
+    }
+
+    // Sprint handling (Shift)
+    this.isSprinting = this.sprintKey.isDown && (inputX !== 0 || inputY !== 0);
+    const currentSpeed = this.isSprinting ? sprintSpeed : baseSpeed;
+
+    // Update dodge state
+    if (this.isDodging) {
+      this.dodgeCooldown -= this.game.loop.delta;
+      if (this.dodgeCooldown <= 0) {
+        this.isDodging = false;
+        this.playerState = 'walking';
+      }
+    }
+
+    // Apply acceleration/deceleration using physics body
+    const body = this.player.body as Phaser.Physics.Arcade.Body;
     
-    // Clamp to world bounds locally
-    const clampedX = Phaser.Math.Clamp(newX, 16, WORLD_BOUNDS.width - 16);
-    const clampedY = Phaser.Math.Clamp(newY, 16, WORLD_BOUNDS.height - 16);
+    if (inputX !== 0 || inputY !== 0) {
+      // Accelerate towards target velocity
+      const targetVX = inputX * currentSpeed;
+      const targetVY = inputY * currentSpeed;
+      
+      body.setAcceleration(targetVX * 4, targetVY * 4);
+      body.setDrag(drag, drag);
+      body.setMaxVelocity(currentSpeed, currentSpeed);
+    } else {
+      // Decelerate to stop
+      body.setAcceleration(0, 0);
+      body.setDrag(drag * 1.5, drag * 1.5);
+    }
 
-    this.player.setPosition(clampedX, clampedY);
-    this.predictedPosition = { x: clampedX, y: clampedY };
+    // Check collision after physics step
+    const collisionResult = this.worldCollision.checkCollision({ 
+      x: this.player.x, 
+      y: this.player.y 
+    });
+    
+    if (collisionResult.collides && collisionResult.correctedPosition) {
+      const dx = collisionResult.correctedPosition.x - this.player.x;
+      const dy = collisionResult.correctedPosition.y - this.player.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist > 0.5) {
+        this.player.setPosition(
+          this.player.x + dx * 0.3,
+          this.player.y + dy * 0.3
+        );
+      } else {
+        this.player.setPosition(collisionResult.correctedPosition.x, collisionResult.correctedPosition.y);
+        body.setVelocity(0, 0);
+      }
+    }
+
+    // Update predicted position for server reconciliation
+    this.predictedPosition = { x: this.player.x, y: this.player.y };
 
     // Update player state
-    const isMoving = velocityX !== 0 || velocityY !== 0;
-    if (isMoving) {
-      this.playerState = 'walking';
+    const isMoving = Math.abs(body.velocity.x) > 10 || Math.abs(body.velocity.y) > 10;
+    if (this.isDodging) {
+      this.playerState = 'dodging';
+    } else if (isMoving) {
+      this.playerState = this.isSprinting ? 'sprinting' : 'walking';
     } else {
       this.playerState = 'idle';
     }
+
+    // Update dynamic camera
+    this.dynamicCamera.update(this.game.loop.delta, { x: body.velocity.x, y: body.velocity.y }, currentSpeed);
 
     // Send movement input to server (throttled)
     if (isMoving || this.playerState === 'idle') {
@@ -814,7 +744,6 @@ export class VillageScene extends Phaser.Scene {
     if (!this.emitter) return;
 
     const now = Date.now();
-    // Throttle to ~20 updates per second
     if (now - (this.movementBuffer[this.movementBuffer.length - 1]?.timestamp || 0) < 50) {
       return;
     }
@@ -834,8 +763,52 @@ export class VillageScene extends Phaser.Scene {
     this.emitter.emit('player_move_input', inputData);
   }
 
+  private performDodge(dirX: number, dirY: number, speed: number, cooldown: number): void {
+    this.isDodging = true;
+    this.dodgeCooldown = cooldown;
+    this.lastDodgeTime = Date.now();
+    this.dodgeDirection = this.direction;
+    this.playerState = 'dodging';
+
+    const body = this.player.body as Phaser.Physics.Arcade.Body;
+    
+    // Instant velocity for dodge
+    body.setVelocity(dirX * speed, dirY * speed);
+    body.setAcceleration(0, 0);
+    body.setDrag(800, 800); // Quick deceleration after dodge
+
+    // Visual feedback - flash and screen shake
+    this.dynamicCamera.shake(8, 150);
+    this.cameras.main.flash(100, 255, 255, 255, true);
+
+    // Dodge particles
+    this.createDodgeParticles();
+
+    // Invincibility frames during dodge (could be used for combat later)
+    this.player.setAlpha(0.6);
+    this.time.delayedCall(200, () => {
+      this.player.setAlpha(1);
+    });
+  }
+
+  private createDodgeParticles(): void {
+    const emitter = this.add.particles(this.player.x, this.player.y, '__DEFAULT', {
+      x: { min: -10, max: 10 },
+      y: { min: -10, max: 10 },
+      lifespan: 300,
+      speed: { min: 50, max: 150 },
+      scale: { start: 0.4, end: 0 },
+      alpha: { start: 0.6, end: 0 },
+      tint: 0xffffff,
+      quantity: 8,
+      blendMode: 'ADD',
+      emitting: false,
+    });
+    emitter.explode(8, this.player.x, this.player.y);
+    this.time.delayedCall(500, () => emitter.destroy());
+  }
+
   private handleSitting() {
-    // Press E to stand up
     if (Phaser.Input.Keyboard.JustDown(this.interactionKey)) {
       this.standUp();
     }
@@ -843,153 +816,18 @@ export class VillageScene extends Phaser.Scene {
 
   private standUp() {
     this.playerState = 'idle';
-    this.sitTarget = null;
-    this.hideInteractionPrompt();
+    this.interactionManager.forceHidePrompt();
   }
 
-  private checkInteractions() {
-    const playerPos = { x: this.player.x, y: this.player.y };
-
-    // Check NPCs
-    const nearbyNpcs = getNpcsAtPosition(playerPos, INTERACTION_RADIUS);
-    if (nearbyNpcs.length > 0) {
-      const npc = nearbyNpcs[0];
-      this.showInteractionPrompt('Talk', () => this.interactWithNPC(npc));
-      return;
-    }
-
-    // Check world objects
-    const nearbyObjects = getObjectsAtPosition(playerPos, INTERACTION_RADIUS);
-    if (nearbyObjects.length > 0) {
-      const obj = nearbyObjects[0];
-      if (obj.interactions && obj.interactions.length > 0) {
-        this.showInteractionPrompt(obj.interactions[0].label, () => this.interactWithObject(obj));
-        return;
-      }
-    }
-
-    this.hideInteractionPrompt();
-  }
-
-  private showInteractionPrompt(label: string, callback: () => void) {
-    if (this.interactionPrompt) {
-      this.interactionPrompt.destroy();
-    }
-
-    const prompt = this.add.container(400, 550);
-    prompt.setScrollFactor(0);
-    prompt.setDepth(1001);
-
-    const bg = this.add.rectangle(0, 0, 100, 30, 0x000000cc);
-    const text = this.add.text(0, 0, `E - ${label}`, {
-      fontSize: '14px',
-      color: '#ffffff'
-    }).setOrigin(0.5);
-
-    prompt.add([bg, text]);
-    this.interactionPrompt = prompt;
-
-    // Handle interaction key press
-    if (Phaser.Input.Keyboard.JustDown(this.interactionKey)) {
-      callback();
-    }
-  }
-
-  private hideInteractionPrompt() {
-    if (this.interactionPrompt) {
-      this.interactionPrompt.destroy();
-      this.interactionPrompt = null;
-    }
-  }
-
-  private interactWithNPC(npc: typeof npcs[0]) {
-    // Emit dialogue event
-    this.emitter?.emit('start_dialogue', { npcId: npc.id });
-  }
-
-  private interactWithObject(obj: typeof villageMap.objects[0]) {
-    const interaction = obj.interactions?.[0];
-    if (!interaction) return;
-
-    switch (interaction.type) {
-      case 'sit':
-        this.sitOnObject(obj);
-        break;
-      case 'pickup':
-        this.pickupItem(obj);
-        break;
-      case 'inspect':
-        this.inspectObject(obj);
-        break;
-      default:
-        console.log('Unknown interaction type:', interaction.type);
-    }
-  }
-
-  private sitOnObject(obj: typeof villageMap.objects[0]) {
-    this.playerState = 'sitting';
-    this.sitTarget = this.worldObjects.find(o => o.getData('objectId') === obj.id) || null;
-
-    // Move player to bench position
-    this.tweens.add({
-      targets: this.player,
-      x: obj.position.x,
-      y: obj.position.y - 10,
-      duration: 200
-    });
-  }
-
-  private pickupItem(obj: typeof villageMap.objects[0]) {
-    const itemType = obj.properties?.itemType as string;
-    if (itemType) {
-      this.emitter?.emit('pickup_item', { itemId: itemType, objectId: obj.id });
-    }
-  }
-
-  private inspectObject(obj: typeof villageMap.objects[0]) {
-    console.log('Inspecting:', obj.id);
-    // Could show a UI panel with object description
-  }
-
-  private emitMovement() {
-    if (this.emitter) {
-      this.emitter.emit('player_move', {
-        position: { x: this.player.x, y: this.player.y },
-        direction: this.direction,
-        state: this.playerState
-      });
-    }
-  }
-
-  private checkBuildingEntry() {
-    const playerPos = { x: this.player.x, y: this.player.y };
-
-    const nearbyObjects = this.worldObjects.filter(obj => {
-      const container = obj as Phaser.GameObjects.Container;
-      const objX = container.x || 0;
-      const objY = container.y || 0;
-      const dx = objX - playerPos.x;
-      const dy = objY - playerPos.y;
-      return Math.sqrt(dx * dx + dy * dy) <= INTERACTION_RADIUS;
-    });
-
-    for (const obj of nearbyObjects) {
-      const objectType = obj.getData('objectType');
-      const interactions = obj.getData('interactions') || [];
-      
-      if (objectType === 'building' && interactions.length > 0) {
-        if (Phaser.Input.Keyboard.JustDown(this.interactionKey)) {
-          const buildingId = obj.getData('properties')?.building;
-          if (buildingId) {
-            this.enterBuilding(buildingId);
-          }
-          return;
-        }
-      }
-    }
-  }
-
-  private enterBuilding(buildingId: string) {
-    this.emitter?.emit('enter_building', { buildingId });
+  destroy() {
+    this.worldRenderer.destroy();
+    this.regionManager.destroy();
+    this.worldCollision.destroy();
+    this.interactionManager.destroy();
+    this.minimap.destroy();
+    this.worldMapUI.destroy();
+    this.dynamicCamera?.destroy();
+    this.atmosphereManager?.destroy();
+    this.audioManager?.destroy();
   }
 }
