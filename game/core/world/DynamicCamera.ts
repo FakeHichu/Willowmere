@@ -209,12 +209,12 @@ export class DynamicCamera {
   // Focus on point temporarily
   focusOn(x: number, y: number, duration: number = 1000, zoom?: number): Promise<void> {
     return new Promise(resolve => {
-      const wasFollowing = (this.camera as any)._follow ? true : false;
+      const wasFollowing = (this.camera as unknown as { _follow?: unknown })._follow ? true : false;
       if (wasFollowing) this.camera.stopFollow();
       
       if (zoom) this.setZoom(zoom, true);
       
-      this.camera.pan(x, y, duration, 'Sine.easeInOut', true, (cam: Phaser.Cameras.Scene2D.Camera, progress: number) => {
+      this.camera.pan(x, y, duration, 'Sine.easeInOut', true, (_cam: unknown, progress: number) => {
         if (progress >= 1) {
           if (wasFollowing && this.target) {
             this.camera.startFollow(this.target, true, this.config.lerp.x, this.config.lerp.y);

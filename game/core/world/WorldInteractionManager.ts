@@ -32,22 +32,24 @@ export class WorldInteractionManager {
     this.emitter = emitter;
   }
 
-  private convertLandmarkInteractions(interactions: LandmarkInteraction[]): InteractionDefinition[] {
+  private convertLandmarkInteractions(interactions?: LandmarkInteraction[]): InteractionDefinition[] {
+    if (!interactions) return [];
     return interactions.map(i => ({
       type: i.type,
       label: i.label,
       key: i.key,
-      action: i.action ? { type: i.action as InteractionAction['type'], payload: {} } : undefined,
+      action: i.action ? { type: 'inspect', payload: { action: i.action } } : undefined,
       condition: i.condition ? { type: 'has_item', payload: i.condition } : undefined,
     }));
   }
 
-  private convertEntranceInteractions(interactions: EntranceInteraction[]): InteractionDefinition[] {
+  private convertEntranceInteractions(interactions?: EntranceInteraction[]): InteractionDefinition[] {
+    if (!interactions) return [];
     return interactions.map(i => ({
       type: i.type,
       label: i.label,
       key: i.key,
-      action: i.action ? { type: i.action as InteractionAction['type'], payload: {} } : undefined,
+      action: i.action,
       condition: undefined,
     }));
   }
@@ -64,6 +66,13 @@ export class WorldInteractionManager {
     this.interactionPrompt.setDepth(1001);
     this.interactionPrompt.setVisible(false);
     this.interactionPrompt.setAlpha(0);
+  }
+
+  triggerInteraction(playerPosition: Vector2): void {
+    const target = this.findNearestInteraction(playerPosition);
+    if (target && target.interactions.length > 0) {
+      this.executeInteraction(target);
+    }
   }
 
   update(playerPosition: Vector2): void {

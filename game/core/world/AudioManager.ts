@@ -144,8 +144,7 @@ export class AudioManager {
   }
 
   private updateAmbientZones(): void {
-    // Get player from scene registry or game object
-    const player = (this.scene as any).player;
+    const player = (this.scene as unknown as { player?: { x: number; y: number } }).player;
     if (!player) return;
     
     const playerX = player.x;
@@ -221,17 +220,20 @@ export class AudioManager {
     }
     
     if (sound) {
-      (sound as any).setVolume?.(volume);
-      (sound as any).setRate?.(pitch);
+      if ('setVolume' in sound && typeof (sound as { setVolume?: (v: number) => void }).setVolume === 'function') {
+        (sound as { setVolume: (v: number) => void }).setVolume(volume);
+      }
       sound.play();
     }
   }
 
-  update(delta: number): void {
+  update(_delta: number): void {
     this.currentIntensity = Phaser.Math.Linear(this.currentIntensity, this.targetIntensity, 0.02);
     
     if (this.currentMusic) {
-      (this.currentMusic as any).setVolume?.(this.config.musicVolume * this.currentIntensity);
+      if ('setVolume' in this.currentMusic && typeof (this.currentMusic as { setVolume?: (v: number) => void }).setVolume === 'function') {
+        (this.currentMusic as { setVolume: (v: number) => void }).setVolume(this.config.musicVolume * this.currentIntensity);
+      }
     }
   }
 
@@ -241,7 +243,7 @@ export class AudioManager {
   }
 
   exitCombat(): void {
-    const player = (this.scene as any).player;
+    const player = (this.scene as unknown as { player?: { x: number; y: number } }).player;
     const region = this.getRegionForPosition(player?.x ?? 0, player?.y ?? 0);
     const track = Array.from(this.musicTracks.values()).find(t => t.regions.includes(region)) || this.musicTracks.get('peaceful')!;
     this.playMoodMusic(track.mood);
@@ -266,7 +268,9 @@ export class AudioManager {
     } else if (type === 'music') {
       this.config.musicVolume = clamped;
       if (this.currentMusic) {
-        (this.currentMusic as any).setVolume?.(this.config.musicVolume * this.targetIntensity);
+        if ('setVolume' in this.currentMusic && typeof (this.currentMusic as { setVolume?: (v: number) => void }).setVolume === 'function') {
+          (this.currentMusic as { setVolume: (v: number) => void }).setVolume(this.config.musicVolume * this.targetIntensity);
+        }
       }
     } else if (type === 'sfx') {
       this.config.sfxVolume = clamped;

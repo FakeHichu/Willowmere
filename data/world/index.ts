@@ -1,33 +1,19 @@
-export { 
-  terrainDefinitions, 
-  terrainTransitionRules, 
-  getTerrainDefinition, 
-  canTransition,
-} from './terrain';
-export type { TerrainDefinition, TerrainType } from './terrain';
-export type { WorldRegion, RegionConnection, WeatherAffinity } from './regions';
-export { 
-  regions, 
-  getRegionById, 
-  getRegionAtPosition, 
-  getConnectedRegions, 
-  getEntrancePosition
-} from './regions';
-export * from './landmarks';
-export * from './objects';
-export type { CollisionObject, CollisionType, CollisionLayer, TerrainCollision, BoundingBox, Size } from './collision';
-export { 
-  collisionObjects,
-  checkCollision,
-  checkCollisionAt,
-  isPositionWalkable,
-  findValidPositionNear,
-  getNearbyCollisionObjects,
-  getCollisionObjectsInRegion,
-  PLAYER_COLLISION_SIZE,
-  NPC_COLLISION_SIZE,
-  terrainCollisions,
-  getTerrainCollision
-} from './collision';
-export * from './entrances';
+export type { TerrainType, TerrainDefinition } from './terrain';
+export { terrainDefinitions, terrainTransitionRules, getTerrainDefinition, canTransition } from './terrain';
+
+export type { WorldRegion, WeatherAffinity, RegionConnection } from './regions';
+export { regions, regionConnections, getRegionById, getRegionAtPosition, getConnectedRegions } from './regions';
+
+export type { Landmark, LandmarkType, LandmarkInteraction } from './landmarks';
+export { landmarks, getLandmarksByRegion, getLandmarkById } from './landmarks';
+
+export { worldObjects, getObjectsByRegion } from './objects';
+
+export type { RegionEntrance, EntranceInteraction, BuildingEntrance } from './entrances';
+export { regionEntrances, buildingEntrances, getRegionEntrances, getBuildingAtPosition, getEntranceAtPosition, getEntrancePosition, getBuildingEntranceById } from './entrances';
+
+export * from './collision';
+export * from './chunks';
+export * from './environment';
+export * from './events';
 export * from './worldMap';

@@ -41,8 +41,10 @@ export { TILE_SIZE };
 export const PLAYER_SPEED = 150;
 export const INTERACTION_RADIUS = 50;
 export const WORLD_BOUNDS = {
-  width: OVERWORLD_WIDTH,
-  height: OVERWORLD_HEIGHT
+  x: -400,
+  y: -3500,
+  width: OVERWORLD_WIDTH + 800,
+  height: OVERWORLD_HEIGHT + 4000
 };
 
 export const MAPS = {

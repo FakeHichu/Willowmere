@@ -69,6 +69,25 @@ private generateTerrainTextures(): void {
     this.terrainTilesetTexture = this.scene.textures.get(textureKey);
     graphics.destroy();
 
+    // IMPORTANT: Add frames to the texture for each terrain type
+    // This allows the tilemap to use frame indices for different terrain types
+    const texture = this.scene.textures.get(textureKey);
+    if (texture) {
+      const source = texture.getSourceImage() as HTMLCanvasElement;
+      if (source) {
+        // Add frames with numeric indices as names (0, 1, 2, ...)
+        this.terrainTypes.forEach((type, index) => {
+          const col = index % 7;
+          const row = Math.floor(index / 7);
+          const x = col * TILE_SIZE;
+          const y = row * TILE_SIZE;
+          
+          // Add frame with numeric index as name
+          texture.add(index.toString(), 0, x, y, TILE_SIZE, TILE_SIZE);
+        });
+      }
+    }
+
     // Create path texture
     this.createPathTexture();
     this.generatedTextures = true;
@@ -199,8 +218,8 @@ private generateTerrainTextures(): void {
     const terrainTileset = this.tilemap.tilesets.find(t => t.name === 'terrain_atlas');
     const pathTileset = this.tilemap.tilesets.find(t => t.name === 'terrain_path');
 
-    console.log('[WorldRenderer] Found terrain_atlas:', terrainTileset ? 'YES' : 'NO', '| object:', terrainTileset ? { name: terrainTileset.name, firstgid: terrainTileset.firstgid, columns: terrainTileset.columns } : null);
-    console.log('[WorldRenderer] Found terrain_path:', pathTileset ? 'YES' : 'NO', '| object:', pathTileset ? { name: pathTileset.name, firstgid: pathTileset.firstgid } : null);
+    console.log('[WorldRenderer] Found terrain_atlas:', terrainTileset ? 'YES' : 'NO', '| object:', terrainTileset ? { name: terrainTileset.name, firstgid: terrainTileset.firstgid, columns: terrainTileset.columns, totalFrames: terrainTileset.total } : null);
+    console.log('[WorldRenderer] Found terrain_path:', pathTileset ? 'YES' : 'NO', '| object:', pathTileset ? { name: pathTileset.name, firstgid: pathTileset.firstgid, total: pathTileset.total } : null);
 
     if (!terrainTileset) {
       console.error('[WorldRenderer] Terrain tileset not found! Available:', this.tilemap.tilesets.map(t => t.name));
@@ -212,9 +231,47 @@ private generateTerrainTextures(): void {
       return;
     }
 
-    const terrainLayer = this.tilemap.createBlankLayer('Terrain', [terrainTileset], 0, 0);
-    const pathLayer = pathTileset ? this.tilemap.createBlankLayer('Paths', [pathTileset], 0, 0) : null;
-    const detailLayer = terrainTileset ? this.tilemap.createBlankLayer('Details', [terrainTileset], 0, 0) : null;
+    // Create layers with error checking
+    let terrainLayer: Phaser.Tilemaps.TilemapLayer | null = null;
+    let pathLayer: Phaser.Tilemaps.TilemapLayer | null = null;
+    let detailLayer: Phaser.Tilemaps.TilemapLayer | null = null;
+
+    try {
+      terrainLayer = this.tilemap.createBlankLayer('Terrain', [terrainTileset], 0, 0);
+      if (!terrainLayer) {
+        console.error('[WorldRenderer] Failed to create Terrain layer');
+      } else {
+        console.log('[WorldRenderer] Terrain layer created successfully');
+      }
+    } catch (e) {
+      console.error('[WorldRenderer] Error creating Terrain layer:', e);
+    }
+
+    try {
+      if (pathTileset) {
+        pathLayer = this.tilemap.createBlankLayer('Paths', [pathTileset], 0, 0);
+        if (!pathLayer) {
+          console.error('[WorldRenderer] Failed to create Paths layer');
+        } else {
+          console.log('[WorldRenderer] Paths layer created successfully');
+        }
+      }
+    } catch (e) {
+      console.error('[WorldRenderer] Error creating Paths layer:', e);
+    }
+
+    try {
+      if (terrainTileset) {
+        detailLayer = this.tilemap.createBlankLayer('Details', [terrainTileset], 0, 0);
+        if (!detailLayer) {
+          console.error('[WorldRenderer] Failed to create Details layer');
+        } else {
+          console.log('[WorldRenderer] Details layer created successfully');
+        }
+      }
+    } catch (e) {
+      console.error('[WorldRenderer] Error creating Details layer:', e);
+    }
 
     console.log('[WorldRenderer] Created layers - Terrain:', terrainLayer ? 'OK' : 'FAILED', '| layer:', terrainLayer);
     console.log('[WorldRenderer] Created layers - Paths:', pathLayer ? 'OK' : 'FAILED', '| layer:', pathLayer);

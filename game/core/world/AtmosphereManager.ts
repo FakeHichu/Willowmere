@@ -385,7 +385,6 @@ export class AtmosphereManager {
 
   private updateWeatherParticles(): void {
     const weather = getCurrentWeather();
-    const regionAtmos = this.regionAtmospheres[this.currentRegion] || this.regionAtmospheres.village;
 
     // Rain
     if (this.rainEmitter) {
@@ -403,7 +402,7 @@ export class AtmosphereManager {
           cam.width + 200,
           50
         );
-        this.rainEmitter.setEmitZone(emitZone as any);
+        this.rainEmitter.setEmitZone(emitZone as unknown as Parameters<Phaser.GameObjects.Particles.ParticleEmitter['setEmitZone']>[0]);
       } else {
         this.rainEmitter.pause();
       }

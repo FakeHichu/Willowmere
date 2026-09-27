@@ -1,498 +1,241 @@
-import type { Vector2 } from '@shared/types';
-import { regions, getRegionById } from './regions';
-import { worldObjects, getObjectById } from './objects';
-
-export interface BuildingEntrance {
-  buildingId: string;
-  exteriorPosition: Vector2;
-  interiorSpawn: Vector2;
-  exitSpawn: Vector2;
-  interiorName: string;
-  requiredKey?: string;
-  locked?: boolean;
-}
+import type { Vector2, InteractionDefinition, InteractionAction } from '@shared/types';
 
 export interface RegionEntrance {
   id: string;
   name: string;
+  regionId: string;
+  targetRegionId: string;
   fromRegion: string;
   toRegion: string;
   position: Vector2;
-  size: Vector2;
-  type: EntranceType;
-  sprite: string;
-  collision: boolean;
-  interactions: EntranceInteraction[];
-  properties?: Record<string, unknown>;
+  targetPosition: Vector2;
+  type: 'road' | 'path' | 'bridge' | 'hidden' | 'cave' | 'building' | 'fast_travel' | 'river';
+  requiresKey?: string;
+  description?: string;
   discovered: boolean;
+  interactions?: EntranceInteraction[];
 }
-
-export type EntranceType =
-  | 'road'
-  | 'path'
-  | 'bridge'
-  | 'cave'
-  | 'hidden'
-  | 'building'
-  | 'teleport';
 
 export interface EntranceInteraction {
   type: string;
   label: string;
   key: string;
-  action?: string;
+  action?: InteractionAction;
+  condition?: Record<string, unknown>;
 }
 
-export const buildingEntrances: BuildingEntrance[] = [
-  // Village buildings
-  {
-    buildingId: 'town_hall',
-    exteriorPosition: { x: 1800, y: 1640 },
-    interiorSpawn: { x: 200, y: 300 },
-    exitSpawn: { x: 1800, y: 1660 },
-    interiorName: "Town Hall - Mayor's Office",
-  },
-  {
-    buildingId: 'general_store',
-    exteriorPosition: { x: 1400, y: 1940 },
-    interiorSpawn: { x: 200, y: 300 },
-    exitSpawn: { x: 1400, y: 1960 },
-    interiorName: 'General Store - Counter',
-  },
-  {
-    buildingId: 'blacksmith',
-    exteriorPosition: { x: 2200, y: 1640 },
-    interiorSpawn: { x: 200, y: 300 },
-    exitSpawn: { x: 2200, y: 1660 },
-    interiorName: 'Blacksmith - Forge',
-  },
-  {
-    buildingId: 'library',
-    exteriorPosition: { x: 1450, y: 2090 },
-    interiorSpawn: { x: 200, y: 300 },
-    exitSpawn: { x: 1450, y: 2110 },
-    interiorName: 'Library - Archives',
-  },
-  {
-    buildingId: 'inn',
-    exteriorPosition: { x: 2250, y: 2040 },
-    interiorSpawn: { x: 200, y: 300 },
-    exitSpawn: { x: 2250, y: 2060 },
-    interiorName: 'Willowmere Inn - Dining Hall',
-  },
-  {
-    buildingId: 'stables',
-    exteriorPosition: { x: 2400, y: 1640 },
-    interiorSpawn: { x: 200, y: 300 },
-    exitSpawn: { x: 2400, y: 1660 },
-    interiorName: 'Stables - Tack Room',
-  },
-  {
-    buildingId: 'player_house',
-    exteriorPosition: { x: 2000, y: 2140 },
-    interiorSpawn: { x: 200, y: 300 },
-    exitSpawn: { x: 2000, y: 2160 },
-    interiorName: 'Player House - Cozy Room',
-  },
-
-  // Whispering Woods buildings
-  {
-    buildingId: 'abandoned_cabin',
-    exteriorPosition: { x: 1300, y: -240 },
-    interiorSpawn: { x: 200, y: 300 },
-    exitSpawn: { x: 1300, y: -220 },
-    interiorName: 'Abandoned Cabin - Interior',
-  },
-
-  // Ancient Ruins buildings
-  {
-    buildingId: 'ruins_chamber',
-    exteriorPosition: { x: 3800, y: -140 },
-    interiorSpawn: { x: 200, y: 300 },
-    exitSpawn: { x: 3800, y: -120 },
-    interiorName: 'Ancient Chamber - Depths',
-  },
-
-  // Highland Trail buildings
-  {
-    buildingId: 'shepherd_hut',
-    exteriorPosition: { x: 400, y: -2540 },
-    interiorSpawn: { x: 200, y: 300 },
-    exitSpawn: { x: 400, y: -2520 },
-    interiorName: "Shepherd's Hut - Interior",
-  },
-
-  // Old Shrine buildings
-  {
-    buildingId: 'shrine_building',
-    exteriorPosition: { x: 600, y: -3540 },
-    interiorSpawn: { x: 200, y: 300 },
-    exitSpawn: { x: 600, y: -3520 },
-    interiorName: 'Shrine Building - Inner Sanctum',
-  },
-
-  // Farmland buildings
-  {
-    buildingId: 'farm_house',
-    exteriorPosition: { x: 550, y: 1390 },
-    interiorSpawn: { x: 200, y: 300 },
-    exitSpawn: { x: 550, y: 1410 },
-    interiorName: 'Farm House - Living Room',
-  },
-  {
-    buildingId: 'barn',
-    exteriorPosition: { x: 400, y: 1380 },
-    interiorSpawn: { x: 200, y: 300 },
-    exitSpawn: { x: 400, y: 1400 },
-    interiorName: 'Barn - Storage Area',
-  },
-];
+export interface BuildingEntrance {
+  id: string;
+  buildingName: string;
+  buildingId: string;
+  exteriorPosition: Vector2;
+  interiorSceneKey: string;
+  interiorPosition: Vector2;
+  interiorName: string;
+  doorSprite?: string;
+  discovered: boolean;
+  interactions?: InteractionDefinition[];
+}
 
 export const regionEntrances: RegionEntrance[] = [
-  // Village entrances
+  // Village connections
   {
     id: 'entrance_north_road',
-    name: 'North Road',
+    name: 'North Forest Trail',
+    regionId: 'village',
+    targetRegionId: 'whispering_woods',
     fromRegion: 'village',
     toRegion: 'whispering_woods',
-    position: { x: 2000, y: 1000 },
-    size: { x: 80, y: 60 },
+    position: { x: 3000, y: 1550 },
+    targetPosition: { x: 3000, y: 1450 },
     type: 'road',
-    sprite: 'road_entrance',
-    collision: false,
     discovered: true,
-    interactions: [
-      { type: 'travel', label: 'Travel to Whispering Woods', key: 'E' },
-    ],
-    properties: { road: true, sign: 'sign_north_road' },
+    interactions: [{ type: 'travel', label: 'Travel to Whispering Woods', key: 'E', action: { type: 'open', payload: { destination: 'whispering_woods' } } }],
   },
   {
     id: 'entrance_east_road',
-    name: 'East Road',
+    name: 'East River Road',
+    regionId: 'village',
+    targetRegionId: 'riverside',
     fromRegion: 'village',
     toRegion: 'riverside',
-    position: { x: 2800, y: 1700 },
-    size: { x: 60, y: 80 },
+    position: { x: 3950, y: 2300 },
+    targetPosition: { x: 4050, y: 2300 },
     type: 'road',
-    sprite: 'road_entrance',
-    collision: false,
     discovered: true,
-    interactions: [
-      { type: 'travel', label: 'Travel to Riverside', key: 'E' },
-    ],
-    properties: { road: true, sign: 'sign_east_road' },
+    interactions: [{ type: 'travel', label: 'Travel to Riverside', key: 'E', action: { type: 'open', payload: { destination: 'riverside' } } }],
   },
   {
     id: 'entrance_west_road',
-    name: 'West Road',
+    name: 'West Explorer Path',
+    regionId: 'village',
+    targetRegionId: 'abandoned_camp',
     fromRegion: 'village',
-    toRegion: 'farmland',
-    position: { x: 1200, y: 1700 },
-    size: { x: 60, y: 80 },
+    toRegion: 'abandoned_camp',
+    position: { x: 2050, y: 2300 },
+    targetPosition: { x: 1950, y: 2300 },
     type: 'road',
-    sprite: 'road_entrance',
-    collision: false,
     discovered: true,
-    interactions: [
-      { type: 'travel', label: 'Travel to Farmland', key: 'E' },
-    ],
-    properties: { road: true, sign: 'sign_west_road' },
+    interactions: [{ type: 'travel', label: 'Travel to Abandoned Camp', key: 'E', action: { type: 'open', payload: { destination: 'abandoned_camp' } } }],
   },
   {
     id: 'entrance_south_road',
-    name: 'South Road',
+    name: 'South Grove Pass',
+    regionId: 'village',
+    targetRegionId: 'hidden_grove',
     fromRegion: 'village',
-    toRegion: 'southern_grove',
-    position: { x: 2000, y: 2400 },
-    size: { x: 80, y: 60 },
+    toRegion: 'hidden_grove',
+    position: { x: 3000, y: 3050 },
+    targetPosition: { x: 3000, y: 3150 },
     type: 'road',
-    sprite: 'road_entrance',
-    collision: false,
     discovered: true,
-    interactions: [
-      { type: 'travel', label: 'Travel to Southern Grove', key: 'E' },
-    ],
-    properties: { road: true, sign: 'sign_south_road' },
+    interactions: [{ type: 'travel', label: 'Travel to Hidden Grove', key: 'E', action: { type: 'open', payload: { destination: 'hidden_grove' } } }],
   },
 
-  // Whispering Woods entrances
+  // Farmland connection
   {
-    id: 'entrance_south_village',
-    name: 'South Path to Village',
-    fromRegion: 'whispering_woods',
+    id: 'entrance_farmland_village',
+    name: 'Farmland Valley Trail',
+    regionId: 'southern_farmland',
+    targetRegionId: 'village',
+    fromRegion: 'southern_farmland',
     toRegion: 'village',
-    position: { x: 2000, y: 1000 },
-    size: { x: 80, y: 60 },
+    position: { x: 1950, y: 2900 },
+    targetPosition: { x: 2050, y: 2900 },
+    type: 'road',
+    discovered: false,
+    interactions: [{ type: 'travel', label: 'Return to Village', key: 'E', action: { type: 'open', payload: { destination: 'village' } } }],
+  },
+  {
+    id: 'entrance_farmland_grove',
+    name: 'Meadow Pathway',
+    regionId: 'southern_farmland',
+    targetRegionId: 'hidden_grove',
+    fromRegion: 'southern_farmland',
+    toRegion: 'hidden_grove',
+    position: { x: 1950, y: 3500 },
+    targetPosition: { x: 2050, y: 3500 },
     type: 'path',
-    sprite: 'path_entrance',
-    collision: false,
     discovered: false,
-    interactions: [
-      { type: 'travel', label: 'Return to Village', key: 'E' },
-    ],
-    properties: { sign: 'sign_woods_village' },
-  },
-  {
-    id: 'entrance_north_wilds',
-    name: 'North Path to Wilds',
-    fromRegion: 'whispering_woods',
-    toRegion: 'northern_wilds',
-    position: { x: 2000, y: -600 },
-    size: { x: 60, y: 80 },
-    type: 'path',
-    sprite: 'path_entrance',
-    collision: false,
-    discovered: false,
-    interactions: [
-      { type: 'travel', label: 'Enter Northern Wilds', key: 'E' },
-    ],
-    properties: { sign: 'sign_woods_wilds' },
-  },
-  {
-    id: 'entrance_east_ruins',
-    name: 'Overgrown Trail to Ruins',
-    fromRegion: 'whispering_woods',
-    toRegion: 'ancient_ruins',
-    position: { x: 3000, y: 200 },
-    size: { x: 40, y: 60 },
-    type: 'hidden',
-    sprite: 'hidden_entrance',
-    collision: false,
-    discovered: false,
-    interactions: [
-      { type: 'travel', label: 'Follow Trail to Ruins', key: 'E' },
-    ],
-    properties: { sign: 'sign_woods_ruins', hidden: true },
-  },
-  {
-    id: 'entrance_hidden_cavern',
-    name: 'Hidden Cavern Entrance',
-    fromRegion: 'whispering_woods',
-    toRegion: 'hidden_cavern',
-    position: { x: 1300, y: 100 },
-    size: { x: 80, y: 60 },
-    type: 'cave',
-    sprite: 'cave_entrance',
-    collision: false,
-    discovered: false,
-    interactions: [
-      { type: 'enter', label: 'Enter Hidden Cavern', key: 'E' },
-    ],
-    properties: { cave: true },
+    interactions: [{ type: 'travel', label: 'Travel to Hidden Grove', key: 'E', action: { type: 'open', payload: { destination: 'hidden_grove' } } }],
   },
 
-  // Northern Wilds entrances
+  // Mountain & Shrine connections
   {
-    id: 'entrance_south_woods',
-    name: 'South Path to Woods',
-    fromRegion: 'northern_wilds',
-    toRegion: 'whispering_woods',
-    position: { x: 1700, y: -600 },
-    size: { x: 60, y: 80 },
+    id: 'entrance_forest_mountains',
+    name: 'Northern Ridge Pass',
+    regionId: 'whispering_woods',
+    targetRegionId: 'northern_mountains',
+    fromRegion: 'whispering_woods',
+    toRegion: 'northern_mountains',
+    position: { x: 3000, y: 50 },
+    targetPosition: { x: 3000, y: -50 },
     type: 'path',
-    sprite: 'path_entrance',
-    collision: false,
     discovered: false,
-    interactions: [
-      { type: 'travel', label: 'Return to Whispering Woods', key: 'E' },
-    ],
-    properties: { sign: 'sign_wilds_woods' },
+    interactions: [{ type: 'travel', label: 'Ascend to Northern Mountains', key: 'E', action: { type: 'open', payload: { destination: 'northern_mountains' } } }],
   },
   {
-    id: 'entrance_highland_trail',
-    name: 'Mountain Trail',
-    fromRegion: 'northern_wilds',
-    toRegion: 'highland_trail',
-    position: { x: 400, y: -2200 },
-    size: { x: 40, y: 80 },
-    type: 'path',
-    sprite: 'path_entrance',
-    collision: false,
-    discovered: false,
-    interactions: [
-      { type: 'travel', label: 'Ascend Highland Trail', key: 'E' },
-    ],
-    properties: { sign: 'sign_wilds_highland' },
-  },
-
-  // Ancient Ruins entrances
-  {
-    id: 'entrance_west_woods',
-    name: 'West Path to Woods',
-    fromRegion: 'ancient_ruins',
-    toRegion: 'whispering_woods',
-    position: { x: 3000, y: 200 },
-    size: { x: 40, y: 60 },
-    type: 'hidden',
-    sprite: 'hidden_entrance',
-    collision: false,
-    discovered: false,
-    interactions: [
-      { type: 'travel', label: 'Return to Whispering Woods', key: 'E' },
-    ],
-    properties: { sign: 'sign_ruins_woods', hidden: true },
-  },
-
-  // Highland Trail entrances
-  {
-    id: 'entrance_south_wilds',
-    name: 'South Path to Wilds',
-    fromRegion: 'highland_trail',
-    toRegion: 'northern_wilds',
-    position: { x: 400, y: -2000 },
-    size: { x: 40, y: 80 },
-    type: 'path',
-    sprite: 'path_entrance',
-    collision: false,
-    discovered: false,
-    interactions: [
-      { type: 'travel', label: 'Descend to Northern Wilds', key: 'E' },
-    ],
-    properties: { sign: 'sign_highland_wilds' },
-  },
-  {
-    id: 'entrance_north_shrine',
-    name: 'Shrine Path',
+    id: 'entrance_highland_shrine',
+    name: 'Sacred Mountain Stairs',
+    regionId: 'highland_trail',
+    targetRegionId: 'old_shrine',
     fromRegion: 'highland_trail',
     toRegion: 'old_shrine',
-    position: { x: 600, y: -3800 },
-    size: { x: 40, y: 60 },
+    position: { x: 900, y: -1450 },
+    targetPosition: { x: 900, y: -1550 },
     type: 'path',
-    sprite: 'path_entrance',
-    collision: false,
     discovered: false,
-    interactions: [
-      { type: 'travel', label: 'Ascend to Old Shrine', key: 'E' },
-    ],
-    properties: { sign: 'sign_highland_shrine' },
+    interactions: [{ type: 'travel', label: 'Ascend to Old Shrine', key: 'E', action: { type: 'open', payload: { destination: 'old_shrine' } } }],
   },
 
-  // Southern Grove entrances
+  // Subterranean cavern
   {
-    id: 'entrance_north_village',
-    name: 'North Path to Village',
-    fromRegion: 'southern_grove',
-    toRegion: 'village',
-    position: { x: 2000, y: 2400 },
-    size: { x: 80, y: 60 },
-    type: 'road',
-    sprite: 'road_entrance',
-    collision: false,
+    id: 'entrance_hidden_cave',
+    name: 'Shadow Cavern Mouth',
+    regionId: 'whispering_woods',
+    targetRegionId: 'cave_underground',
+    fromRegion: 'whispering_woods',
+    toRegion: 'cave_underground',
+    position: { x: 3850, y: 300 },
+    targetPosition: { x: 4100, y: -1300 },
+    type: 'cave',
     discovered: false,
-    interactions: [
-      { type: 'travel', label: 'Return to Village', key: 'E' },
-    ],
-    properties: { sign: 'sign_grove_village' },
-  },
-  {
-    id: 'entrance_east_hidden',
-    name: 'Hidden East Trail',
-    fromRegion: 'southern_grove',
-    toRegion: 'whispering_woods',
-    position: { x: 2800, y: 3100 },
-    size: { x: 40, y: 60 },
-    type: 'hidden',
-    sprite: 'hidden_entrance',
-    collision: false,
-    discovered: false,
-    interactions: [
-      { type: 'travel', label: 'Follow Hidden Trail', key: 'E' },
-    ],
-    properties: { sign: 'sign_grove_hidden', hidden: true },
-  },
-
-  // Farmland entrances
-  {
-    id: 'entrance_east_village',
-    name: 'East Road to Village',
-    fromRegion: 'farmland',
-    toRegion: 'village',
-    position: { x: 1200, y: 1700 },
-    size: { x: 60, y: 80 },
-    type: 'road',
-    sprite: 'road_entrance',
-    collision: false,
-    discovered: false,
-    interactions: [
-      { type: 'travel', label: 'Travel to Village', key: 'E' },
-    ],
-    properties: { sign: 'sign_farm_village' },
-  },
-  {
-    id: 'entrance_north_forest',
-    name: 'North Path to Woods',
-    fromRegion: 'farmland',
-    toRegion: 'whispering_woods',
-    position: { x: 600, y: 2400 },
-    size: { x: 40, y: 60 },
-    type: 'path',
-    sprite: 'path_entrance',
-    collision: false,
-    discovered: false,
-    interactions: [
-      { type: 'travel', label: 'Enter Whispering Woods', key: 'E' },
-    ],
-    properties: { sign: 'sign_farm_forest' },
+    interactions: [{ type: 'enter', label: 'Enter Shadow Cavern', key: 'E', action: { type: 'open', payload: { destination: 'cave_underground' } } }],
   },
 ];
 
-export function getBuildingEntrance(buildingId: string): BuildingEntrance | undefined {
-  return buildingEntrances.find(e => e.buildingId === buildingId);
+export const buildingEntrances: BuildingEntrance[] = [
+  {
+    id: 'building_town_hall',
+    buildingName: 'Willowmere Town Hall',
+    buildingId: 'building_town_hall',
+    exteriorPosition: { x: 3000, y: 2000 },
+    interiorSceneKey: 'BuildingInteriorScene',
+    interiorPosition: { x: 400, y: 500 },
+    interiorName: "Town Hall - Mayor's Office",
+    discovered: true,
+    interactions: [{ type: 'open', label: 'Enter Town Hall', key: 'E', action: { type: 'open', payload: { buildingId: 'building_town_hall' } } }],
+  },
+  {
+    id: 'building_general_store',
+    buildingName: 'General Goods Store',
+    buildingId: 'building_general_store',
+    exteriorPosition: { x: 2850, y: 2200 },
+    interiorSceneKey: 'BuildingInteriorScene',
+    interiorPosition: { x: 400, y: 500 },
+    interiorName: 'General Store - Counter',
+    discovered: true,
+    interactions: [{ type: 'open', label: 'Enter General Store', key: 'E', action: { type: 'open', payload: { buildingId: 'building_general_store' } } }],
+  },
+  {
+    id: 'building_blacksmith',
+    buildingName: 'Forge & Anvil Blacksmith',
+    buildingId: 'building_blacksmith',
+    exteriorPosition: { x: 3150, y: 2200 },
+    interiorSceneKey: 'BuildingInteriorScene',
+    interiorPosition: { x: 400, y: 500 },
+    interiorName: 'Blacksmith - Forge',
+    discovered: true,
+    interactions: [{ type: 'open', label: 'Enter Blacksmith', key: 'E', action: { type: 'open', payload: { buildingId: 'building_blacksmith' } } }],
+  },
+  {
+    id: 'building_inn',
+    buildingName: 'The Wayfarer Inn',
+    buildingId: 'building_inn',
+    exteriorPosition: { x: 3000, y: 2450 },
+    interiorSceneKey: 'BuildingInteriorScene',
+    interiorPosition: { x: 400, y: 500 },
+    interiorName: 'Inn - Common Room',
+    discovered: true,
+    interactions: [{ type: 'open', label: 'Enter Inn', key: 'E', action: { type: 'open', payload: { buildingId: 'building_inn' } } }],
+  },
+];
+
+export function getRegionEntrances(regionId: string): RegionEntrance[] {
+  return regionEntrances.filter(e => e.regionId === regionId);
 }
 
-export function getRegionEntrance(entranceId: string): RegionEntrance | undefined {
-  return regionEntrances.find(e => e.id === entranceId);
-}
-
-export function getRegionEntrances(fromRegion: string): RegionEntrance[] {
-  return regionEntrances.filter(e => e.fromRegion === fromRegion);
-}
-
-export function getEntranceAtPosition(
-  position: Vector2,
-  radius: number = 50
-): RegionEntrance | undefined {
-  return regionEntrances.find(entrance => {
-    const dx = entrance.position.x - position.x;
-    const dy = entrance.position.y - position.y;
+export function getBuildingAtPosition(position: Vector2, radius: number = 50): BuildingEntrance | undefined {
+  return buildingEntrances.find(e => {
+    const dx = e.exteriorPosition.x - position.x;
+    const dy = e.exteriorPosition.y - position.y;
     return Math.sqrt(dx * dx + dy * dy) <= radius;
   });
 }
 
-export function getBuildingAtPosition(
-  position: Vector2,
-  radius: number = 50
-): BuildingEntrance | undefined {
-  for (const entrance of buildingEntrances) {
-    const dx = entrance.exteriorPosition.x - position.x;
-    const dy = entrance.exteriorPosition.y - position.y;
-    if (Math.sqrt(dx * dx + dy * dy) <= radius) {
-      return entrance;
-    }
-  }
-  return undefined;
+export function getEntranceAtPosition(position: Vector2, radius: number = 50): RegionEntrance | undefined {
+  return regionEntrances.find(e => {
+    const dx = e.position.x - position.x;
+    const dy = e.position.y - position.y;
+    return Math.sqrt(dx * dx + dy * dy) <= radius;
+  });
 }
 
-export function getRegionEntranceBetween(fromRegion: string, toRegion: string): RegionEntrance | undefined {
-  return regionEntrances.find(e => e.fromRegion === fromRegion && e.toRegion === toRegion);
-}
-
-export function markEntranceDiscovered(entranceId: string): void {
+export function getEntrancePosition(entranceId: string): Vector2 | undefined {
   const entrance = regionEntrances.find(e => e.id === entranceId);
-  if (entrance) {
-    entrance.discovered = true;
-  }
+  return entrance ? entrance.position : undefined;
 }
 
-export function isEntranceDiscovered(entranceId: string): boolean {
-  const entrance = regionEntrances.find(e => e.id === entranceId);
-  return entrance?.discovered ?? false;
-}
-
-export function getAllBuildingEntrances(): BuildingEntrance[] {
-  return buildingEntrances;
-}
-
-export function getAllRegionEntrances(): RegionEntrance[] {
-  return regionEntrances;
+export function getBuildingEntranceById(id: string): BuildingEntrance | undefined {
+  return buildingEntrances.find(b => b.id === id || b.buildingId === id);
 }

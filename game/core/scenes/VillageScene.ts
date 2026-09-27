@@ -1,8 +1,7 @@
 import Phaser from 'phaser';
 import type { CharacterCustomization, PlayerState, Direction, Vector2, NetworkPlayer } from '@shared/types';
-import { WORLD_BOUNDS, PLAYER_SPEED, INTERACTION_RADIUS } from '../GameConfig';
+import { WORLD_BOUNDS, PLAYER_SPEED } from '../GameConfig';
 import { getGameTime } from '@backend/time/clock';
-import { npcs, getNpcsAtPosition } from '@data/npcs';
 import {
   WorldRenderer,
   RegionManager,
@@ -10,18 +9,22 @@ import {
   WorldInteractionManager,
   Minimap,
   WorldMapUI,
-  RegionChangeEvent,
   AtmosphereManager,
   AudioManager,
+  DynamicCamera,
+  WorldChunkManager,
+  WorldStreamer,
+  LandmarkManager,
+  WorldObjectManager,
+  EnvironmentManager,
+  WorldEventManager,
 } from '../world';
-import { DynamicCamera } from '../world/DynamicCamera';
+import { CharacterRenderer } from '../characters/CharacterRenderer';
+import { NPCManager } from '../npc/NPCManager';
+import { ProgressionSystem } from '../world/ProgressionSystem';
+import { overworldData } from '@data/world/worldMap';
 
 interface PlayerSprite extends Phaser.GameObjects.Container {
-  body: Phaser.Physics.Arcade.Body;
-}
-
-interface NPCSprite extends Phaser.GameObjects.Container {
-  npcId: string;
   body: Phaser.Physics.Arcade.Body;
 }
 
@@ -42,15 +45,13 @@ export class VillageScene extends Phaser.Scene {
   private interactionKey!: Phaser.Input.Keyboard.Key;
   private playerCustomization: CharacterCustomization;
   private otherPlayers: Map<string, InterpolatedPlayer> = new Map();
-  private npcSprites: NPCSprite[] = [];
   private emitter?: Phaser.Events.EventEmitter;
-
-  
 
   private predictedPosition: Vector2 = { x: 0, y: 0 };
   private lastServerPosition: Vector2 = { x: 0, y: 0 };
   private movementBuffer: Array<{ position: Vector2; direction: Direction; state: PlayerState; timestamp: number }> = [];
 
+  // Managers
   private worldRenderer!: WorldRenderer;
   private regionManager!: RegionManager;
   private worldCollision!: WorldCollision;
@@ -60,6 +61,17 @@ export class VillageScene extends Phaser.Scene {
   private dynamicCamera!: DynamicCamera;
   private atmosphereManager!: AtmosphereManager;
   private audioManager!: AudioManager;
+  private chunkManager!: WorldChunkManager;
+  private worldStreamer!: WorldStreamer;
+  private landmarkManager!: LandmarkManager;
+  private objectManager!: WorldObjectManager;
+  private environmentManager!: EnvironmentManager;
+  private eventManager!: WorldEventManager;
+  private npcManager!: NPCManager;
+  private characterRenderer!: CharacterRenderer;
+  private progressionSystem!: ProgressionSystem;
+  private lastRegionId = 'village';
+
   private hudElements!: {
     playerPanel: Phaser.GameObjects.Container;
     clockPanel: Phaser.GameObjects.Container;
@@ -70,14 +82,12 @@ export class VillageScene extends Phaser.Scene {
     coordText: Phaser.GameObjects.Text;
   };
 
-  // Advanced movement
+  // Movement controls
   private sprintKey!: Phaser.Input.Keyboard.Key;
   private dodgeKey!: Phaser.Input.Keyboard.Key;
   private isSprinting = false;
   private isDodging = false;
   private dodgeCooldown = 0;
-  private lastDodgeTime = 0;
-  private dodgeDirection: Direction = 'down';
 
   constructor() {
     super({ key: 'VillageScene' });
@@ -87,18 +97,16 @@ export class VillageScene extends Phaser.Scene {
   init(data: { customization: CharacterCustomization; emitter?: Phaser.Events.EventEmitter; playerId?: string; username?: string }) {
     this.playerCustomization = data.customization || this.game.registry.get('customization') || {} as CharacterCustomization;
     
-    // Redirect to character creation if no customization data
     if (!this.playerCustomization.skinTone) {
       this.scene.start('CharacterCreationScene');
       return;
     }
     
-    // Get emitter from data or from game registry (set in preBoot)
     this.emitter = data.emitter || this.game.registry.get('emitter');
   }
 
   async create() {
-    this.physics.world.setBounds(0, 0, WORLD_BOUNDS.width, WORLD_BOUNDS.height);
+    this.physics.world.setBounds(WORLD_BOUNDS.x, WORLD_BOUNDS.y, WORLD_BOUNDS.width, WORLD_BOUNDS.height);
 
     this.worldRenderer = new WorldRenderer(this);
     await this.worldRenderer.create();
@@ -121,15 +129,36 @@ export class VillageScene extends Phaser.Scene {
     this.atmosphereManager = new AtmosphereManager(this);
     this.atmosphereManager.create();
 
-    this.createNPCs();
-this.createPlayer();
+    this.audioManager = new AudioManager(this);
+    this.audioManager.create();
+
+    // Initialize Open World Managers
+    this.chunkManager = new WorldChunkManager();
+    this.chunkManager.create();
+
+    this.worldStreamer = new WorldStreamer(this);
+    this.worldStreamer.create();
+
+    this.landmarkManager = new LandmarkManager(this, this.emitter!);
+    this.landmarkManager.create();
+
+    this.objectManager = new WorldObjectManager(this);
+    this.objectManager.create();
+
+    this.environmentManager = new EnvironmentManager(this);
+
+    this.eventManager = new WorldEventManager(this, this.emitter!);
+    this.eventManager.create();
+
+    this.npcManager = new NPCManager(this);
+    this.npcManager.create();
+
+    this.progressionSystem = new ProgressionSystem(this);
+
+    this.createPlayer();
     this.setupCamera();
     this.setupControls();
     this.createUI();
-    // AtmosphereManager handles lighting/day-night now
-    // this.startDayNightVisuals();
-    this.audioManager = new AudioManager(this);
-    this.audioManager.create();
     this.setupNetworkListeners();
     this.syncDiscoveredState();
   }
@@ -140,101 +169,29 @@ this.createPlayer();
     this.worldMapUI.setDiscoveredRegions(discoveredRegions);
   }
 
-  private createNPCs() {
-    npcs.forEach(npcData => {
-      const container = this.add.container(npcData.position.x, npcData.position.y) as NPCSprite;
-      container.npcId = npcData.id;
-
-      const colors: Record<string, number> = {
-        'npc_arthur': 0x4caf50,
-        'npc_elara': 0xffc107,
-        'npc_bram': 0xff5722,
-        'npc_lily': 0x9c27b0,
-        'npc_finn': 0x2196f3,
-        'npc_mira': 0x9c27b0,
-        'npc_tom': 0x795548,
-        'npc_nora': 0x00bcd4,
-        'npc_walter': 0x8d6e63,
-        'npc_sasha': 0xff9800,
-      };
-
-      const bodyColor = colors[npcData.id] || 0x9e9e9e;
-
-      const body = this.add.rectangle(0, 0, 24, 32, bodyColor);
-      const head = this.add.circle(0, -20, 12, 0xffd7ba);
-      const nameText = this.add.text(0, -40, npcData.name, {
-        fontSize: '12px',
-        color: '#ffffff',
-        backgroundColor: '#000000aa',
-        padding: { x: 4, y: 2 }
-      }).setOrigin(0.5);
-
-      container.add([body, head, nameText]);
-
-      this.physics.add.existing(container);
-      container.body.setSize(24, 32);
-      container.body.setOffset(-12, -16);
-      (container.body as Phaser.Physics.Arcade.Body).setImmovable(true);
-
-      this.npcSprites.push(container);
-
-      this.tweens.add({
-        targets: container,
-        y: npcData.position.y - 2,
-        duration: 2000,
-        yoyo: true,
-        repeat: -1,
-        ease: 'Sine.easeInOut'
-      });
-    });
-  }
-
   private createPlayer() {
-    const spawnPoint = { x: 2000, y: 1750 };
+    const spawnPoint = overworldData.defaultSpawnPoint;
 
     this.player = this.add.container(spawnPoint.x, spawnPoint.y) as PlayerSprite;
 
     this.predictedPosition = { ...spawnPoint };
     this.lastServerPosition = { ...spawnPoint };
 
-    this.updatePlayerAppearance();
+    this.characterRenderer = new CharacterRenderer(
+      this,
+      spawnPoint.x,
+      spawnPoint.y,
+      this.playerCustomization,
+      'You'
+    );
 
     this.physics.add.existing(this.player);
     this.player.body.setSize(24, 32);
     this.player.body.setOffset(-12, -16);
     this.player.body.setCollideWorldBounds(true);
-
-    this.npcSprites.forEach(npc => {
-      this.physics.add.collider(this.player, npc);
-    });
-  }
-
-  private updatePlayerAppearance() {
-    this.player.removeAll(true);
-
-    const skinTones: Record<string, number> = {
-      'skin_01': 0xffe4d0, 'skin_02': 0xf5d0b5, 'skin_03': 0xe8c4a2,
-      'skin_04': 0xd4a574, 'skin_05': 0xc4956a, 'skin_06': 0xa67c52,
-      'skin_07': 0x8b5a2b, 'skin_08': 0x6b4423, 'skin_09': 0x4a3021,
-      'skin_10': 0x3d261a
-    };
-
-    const skinColor = skinTones[this.playerCustomization.skinTone] || 0xffd7ba;
-    const topColor = Phaser.Display.Color.HexStringToColor(this.playerCustomization.topColor || '#87CEEB').color;
-    const bottomColor = Phaser.Display.Color.HexStringToColor(this.playerCustomization.bottomColor || '#8B4513').color;
-    const hairColor = Phaser.Display.Color.HexStringToColor(this.playerCustomization.hairColor || '#6B4226').color;
-
-    const legs = this.add.rectangle(0, 12, 20, 16, bottomColor);
-    const body = this.add.rectangle(0, 0, 24, 28, topColor);
-    const head = this.add.circle(0, -18, 10, skinColor);
-    const hair = this.add.rectangle(0, -22, 22, 10, hairColor);
-    const eyes = this.add.rectangle(0, -18, 8, 2, 0x000000);
-
-    this.player.add([legs, body, head, hair, eyes]);
   }
 
   private setupCamera() {
-    // Use dynamic camera system
     this.dynamicCamera = new DynamicCamera(this, {
       lerp: { x: 0.08, y: 0.08 },
       deadzone: new Phaser.Geom.Rectangle(-40, -30, 80, 60),
@@ -242,320 +199,187 @@ this.createPlayer();
       minZoom: 0.9,
       maxZoom: 2.5,
       lookAhead: { x: 100, y: 80 },
-      bounds: new Phaser.Geom.Rectangle(0, 0, WORLD_BOUNDS.width, WORLD_BOUNDS.height),
+      bounds: new Phaser.Geom.Rectangle(WORLD_BOUNDS.x, WORLD_BOUNDS.y, WORLD_BOUNDS.width, WORLD_BOUNDS.height),
     });
     this.dynamicCamera.setTarget(this.player);
   }
 
   private setupControls() {
-    if (this.input.keyboard) {
-      this.cursors = this.input.keyboard.createCursorKeys();
-      this.wasdKeys = {
-        W: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.W),
-        A: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.A),
-        S: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.S),
-        D: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.D)
-      };
-      this.interactionKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.E);
-      this.sprintKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SHIFT);
-      this.dodgeKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
-    }
+    if (!this.input.keyboard) return;
+
+    this.cursors = this.input.keyboard.createCursorKeys();
+    this.wasdKeys = {
+      W: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.W),
+      A: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.A),
+      S: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.S),
+      D: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.D),
+    };
+
+    this.interactionKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.E);
+    this.sprintKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SHIFT);
+    this.dodgeKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
+
+    this.interactionKey.on('down', () => {
+      this.interactionManager.triggerInteraction({ x: this.player.x, y: this.player.y });
+    });
+
+    const mapKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.M);
+    mapKey.on('down', () => {
+      this.worldMapUI.toggle();
+    });
   }
 
   private createUI() {
-    const hud = this.add.container(0, 0);
-    hud.setScrollFactor(0);
-    hud.setDepth(1000);
+    const screenWidth = this.cameras.main.width;
 
-    // Top-left: Player info panel
-    const playerPanel = this.createPlayerPanel();
-    hud.add(playerPanel);
+    const playerPanel = this.add.container(20, 20);
+    playerPanel.setScrollFactor(0);
+    playerPanel.setDepth(3000);
 
-    // Top-center: Clock and region
-    const clockPanel = this.createClockPanel();
-    hud.add(clockPanel);
+    const bg = this.add.rectangle(0, 0, 160, 40, 0x000000, 0.6);
+    bg.setOrigin(0, 0);
+    bg.setStrokeStyle(1, 0xffffff, 0.2);
 
-    // Top-right: Minimap toggle hint (minimap is always visible now)
-    // Bottom-center: Coordinates and region info
-    const coordPanel = this.createCoordPanel();
-    hud.add(coordPanel);
+    const nameText = this.add.text(10, 10, 'Willowmere Explorer', {
+      fontFamily: 'Inter, Arial, sans-serif',
+      fontSize: '12px',
+      color: '#ffffff',
+    });
 
-    // Store references for updates
+    playerPanel.add([bg, nameText]);
+
+    const clockPanel = this.add.container(screenWidth - 220, 20);
+    clockPanel.setScrollFactor(0);
+    clockPanel.setDepth(3000);
+
+    const clockBg = this.add.rectangle(0, 0, 200, 50, 0x000000, 0.6);
+    clockBg.setOrigin(0, 0);
+    clockBg.setStrokeStyle(1, 0xffffff, 0.2);
+
+    const clockText = this.add.text(10, 8, 'Day 1, 8:00 AM', {
+      fontFamily: 'Inter, Arial, sans-serif',
+      fontSize: '12px',
+      color: '#ffd700',
+    });
+
+    const regionText = this.add.text(10, 26, 'Willowmere Village', {
+      fontFamily: 'Inter, Arial, sans-serif',
+      fontSize: '11px',
+      color: '#81c784',
+    });
+
+    clockPanel.add([clockBg, clockText, regionText]);
+
+    const coordPanel = this.add.container(20, this.cameras.main.height - 40);
+    coordPanel.setScrollFactor(0);
+    coordPanel.setDepth(3000);
+
+    const coordBg = this.add.rectangle(0, 0, 180, 24, 0x000000, 0.6);
+    coordBg.setOrigin(0, 0);
+
+    const coordText = this.add.text(10, 5, 'X: 3000  Y: 2300', {
+      fontFamily: 'Consolas, monospace',
+      fontSize: '11px',
+      color: '#aaaaaa',
+    });
+
+    coordPanel.add([coordBg, coordText]);
+
     this.hudElements = {
       playerPanel,
       clockPanel,
       coordPanel,
-      playerNameText: playerPanel.getAt(2) as Phaser.GameObjects.Text,
-      clockText: clockPanel.getAt(1) as Phaser.GameObjects.Text,
-      regionText: clockPanel.getAt(2) as Phaser.GameObjects.Text,
-      coordText: coordPanel.getAt(1) as Phaser.GameObjects.Text,
+      playerNameText: nameText,
+      clockText,
+      regionText,
+      coordText,
     };
-  }
-
-  private createPlayerPanel(): Phaser.GameObjects.Container {
-    const panel = this.add.container(20, 20);
-    panel.setScrollFactor(0);
-    panel.setDepth(1000);
-
-    // Panel background
-    const bg = this.add.rectangle(0, 0, 200, 50, 0x1a1a2e, 0.9);
-    bg.setOrigin(0, 0);
-    bg.setStrokeStyle(2, 0x8d6e63, 0.8);
-    bg.setInteractive();
-
-    // Player avatar circle
-    const avatar = this.add.circle(25, 25, 20, 0x8d6e63);
-    avatar.setStrokeStyle(2, 0xffd700, 1);
-
-    // Player name
-    const nameText = this.add.text(55, 12, 'Traveler', {
-      fontSize: '16px',
-      color: '#ffd700',
-      fontFamily: 'Georgia, serif',
-      fontStyle: 'bold',
-      stroke: '#000000',
-      strokeThickness: 2,
-    }).setOrigin(0, 0.5);
-
-    // Coins/currency
-    const coinText = this.add.text(55, 34, '💰 0', {
-      fontSize: '12px',
-      color: '#ffd700',
-      fontFamily: 'Georgia, serif',
-    }).setOrigin(0, 0.5);
-
-    panel.add([bg, avatar, nameText, coinText]);
-
-    // Hover effect
-    bg.on('pointerover', () => bg.setFillStyle(0x2a2a3e, 0.95));
-    bg.on('pointerout', () => bg.setFillStyle(0x1a1a2e, 0.9));
-
-    return panel;
-  }
-
-  private createClockPanel(): Phaser.GameObjects.Container {
-    const x = this.scale.width / 2;
-    const panel = this.add.container(x, 20);
-    panel.setScrollFactor(0);
-    panel.setDepth(1000);
-
-    const bg = this.add.rectangle(0, 0, 220, 40, 0x1a1a2e, 0.9);
-    bg.setStrokeStyle(2, 0x8d6e63, 0.8);
-    bg.setOrigin(0.5, 0);
-
-    // Clock icon
-    const clockIcon = this.add.text(-90, 0, '🕐', {
-      fontSize: '18px',
-    }).setOrigin(0.5);
-
-    // Time text
-    const timeText = this.add.text(-60, 0, 'Day 1, 08:00 AM', {
-      fontSize: '14px',
-      color: '#ffd700',
-      fontFamily: 'Georgia, serif',
-      fontStyle: 'bold',
-      stroke: '#000000',
-      strokeThickness: 2,
-    }).setOrigin(0, 0.5);
-
-    // Region text
-    const regionText = this.add.text(20, 0, 'Willowmere Village', {
-      fontSize: '12px',
-      color: '#aaaaaa',
-      fontFamily: 'Georgia, serif',
-    }).setOrigin(0, 0.5);
-
-    panel.add([bg, clockIcon, timeText, regionText]);
-    return panel;
-  }
-
-  private createCoordPanel(): Phaser.GameObjects.Container {
-    const x = this.scale.width / 2;
-    const y = this.scale.height - 30;
-    const panel = this.add.container(x, y);
-    panel.setScrollFactor(0);
-    panel.setDepth(1000);
-
-    const bg = this.add.rectangle(0, 0, 200, 28, 0x000000, 0.7);
-    bg.setStrokeStyle(1, 0x8d6e63, 0.5);
-    bg.setOrigin(0.5, 1);
-
-    const coordText = this.add.text(0, 0, 'X: 2000  Y: 1750', {
-      fontSize: '11px',
-      color: '#aaaaaa',
-      fontFamily: 'Georgia, serif',
-    }).setOrigin(0.5);
-
-    panel.add([bg, coordText]);
-    return panel;
   }
 
   private setupNetworkListeners() {
     if (!this.emitter) return;
 
+    this.emitter.on('player_move', (data: { id: string; position: Vector2; direction: Direction; state: PlayerState }) => {
+      if (data.id === this.game.registry.get('playerId')) {
+        this.reconcilePosition(data.position);
+      } else {
+        this.updateOtherPlayer(data);
+      }
+    });
+
     this.emitter.on('player_join', (data: NetworkPlayer) => {
       this.addOtherPlayer(data);
     });
 
-    this.emitter.on('player_leave', (playerId: string) => {
-      this.removeOtherPlayer(playerId);
-    });
-
-    this.emitter.on('player_offline', (playerId: string) => {
-      this.setPlayerOffline(playerId);
-    });
-
-    this.emitter.on('player_move', (data: Partial<NetworkPlayer> & { id: string }) => {
-      this.updateOtherPlayer(data);
-    });
-
-    this.emitter.on('player_position_correction', (data: { position: Vector2; direction: Direction; state: PlayerState }) => {
-      this.reconcilePosition(data);
-    });
-
-    this.emitter.on('enter_building', (data: { buildingId: string; interiorName: string; spawnPoint: { x: number; y: number } }) => {
-      this.scene.start('BuildingInteriorScene', {
-        customization: this.playerCustomization,
-        buildingId: data.buildingId,
-        emitter: this.emitter
-      });
-    });
-
-    this.emitter.on('map_change', (data: { mapId: string; spawnPoint: { x: number; y: number } }) => {
-      this.scene.restart({
-        customization: this.playerCustomization,
-        emitter: this.emitter
-      });
-    });
-
-    this.emitter.on('region_entered', (data: RegionChangeEvent) => {
-      if (data.currentRegion) {
-        this.minimap.discoverRegion(data.currentRegion.id);
-        this.worldMapUI.discoverRegion(data.currentRegion.id);
-        this.atmosphereManager.setRegion(data.currentRegion.id);
-      }
-    });
-
-    this.emitter.on('region_discovered', (data: { regionId: string }) => {
-      this.minimap.discoverRegion(data.regionId);
-      this.worldMapUI.discoverRegion(data.regionId);
-    });
-
-    this.emitter.on('request_region_travel', (data: { fromRegion: string; toRegion: string; entranceId: string }) => {
-      this.handleRegionTravel(data.fromRegion, data.toRegion, data.entranceId);
+    this.emitter.on('player_leave', (data: { id: string }) => {
+      this.removeOtherPlayer(data.id);
     });
   }
 
-  private handleRegionTravel(fromRegion: string, toRegion: string, entranceId: string) {
-    const entrance = this.regionManager.getEntrancePosition(entranceId);
-    if (entrance) {
-      this.player.setPosition(entrance.x, entrance.y);
-      this.predictedPosition = { ...entrance };
-      this.lastServerPosition = { ...entrance };
-      this.regionManager.forceRegion(toRegion);
+  private reconcilePosition(serverPos: Vector2) {
+    this.lastServerPosition = { ...serverPos };
+    const dx = serverPos.x - this.player.x;
+    const dy = serverPos.y - this.player.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+
+    if (dist > 50) {
+      this.player.setPosition(serverPos.x, serverPos.y);
+      this.characterRenderer.setPosition(serverPos.x, serverPos.y);
+      this.predictedPosition = { ...serverPos };
     }
   }
 
-  private reconcilePosition(data: { position: Vector2; direction: Direction; state: PlayerState }) {
-    this.lastServerPosition = data.position;
-    
-    this.tweens.add({
-      targets: this.player,
-      x: data.position.x,
-      y: data.position.y,
-      duration: 50,
-      ease: 'Linear',
-      onComplete: () => {
-        this.predictedPosition = { ...data.position };
-      }
-    });
-
-    this.direction = data.direction;
-    this.playerState = data.state;
+  private updateOtherPlayer(data: { id: string; position: Vector2; direction: Direction; state: PlayerState }) {
+    if (!data.id) {
+      console.warn('updateOtherPlayer received data without id:', data);
+      return;
+    }
+    let player = this.otherPlayers.get(data.id);
+    if (!player) {
+      player = {
+        id: data.id,
+        username: `Player_${data.id.substring(0, 4)}`,
+        customization: {} as CharacterCustomization,
+        position: data.position,
+        targetPosition: data.position,
+        renderPosition: { ...data.position },
+        direction: data.direction,
+        state: data.state,
+        lastUpdate: Date.now(),
+        isOnline: true,
+      };
+      this.otherPlayers.set(data.id, player);
+      this.createOtherPlayerSprite(player);
+    } else {
+      player.targetPosition = data.position;
+      player.direction = data.direction;
+      player.state = data.state;
+      player.lastUpdate = Date.now();
+    }
   }
 
-  private addOtherPlayer(player: NetworkPlayer) {
-    if (this.otherPlayers.has(player.id)) return;
-
-    const renderPos = { ...player.position };
-    const interpolatedPlayer: InterpolatedPlayer = {
-      ...player,
-      renderPosition: renderPos,
-      targetPosition: renderPos,
-      lastUpdate: player.lastUpdate,
-      isOnline: player.isOnline ?? true,
-    };
-
+  private createOtherPlayerSprite(player: InterpolatedPlayer) {
     const container = this.add.container(player.position.x, player.position.y);
-
-    const body = this.add.rectangle(0, 0, 24, 32, 0x4fc3f7);
-    const head = this.add.circle(0, -20, 10, 0xffd7ba);
-    const nameText = this.add.text(0, -35, player.username, {
-      fontSize: '10px',
-      color: '#ffffff',
-      backgroundColor: '#000000aa',
-      padding: { x: 2, y: 1 }
-    }).setOrigin(0.5);
-
-    const offlineText = this.add.text(0, -50, '', {
-      fontSize: '9px',
-      color: '#ff9800',
-      backgroundColor: '#000000aa',
-      padding: { x: 2, y: 1 }
-    }).setOrigin(0.5).setVisible(false);
-
-    container.add([body, head, nameText, offlineText]);
-
-    interpolatedPlayer.sprite = container;
-    this.otherPlayers.set(player.id, interpolatedPlayer);
+    const body = this.add.rectangle(0, 0, 24, 32, 0x2196f3);
+    const text = this.add.text(0, -28, player.username, { fontSize: '11px', color: '#ffffff' }).setOrigin(0.5);
+    container.add([body, text]);
+    player.sprite = container;
   }
 
-  private removeOtherPlayer(playerId: string) {
-    const player = this.otherPlayers.get(playerId);
-    if (player?.sprite) {
+  private addOtherPlayer(data: NetworkPlayer) {
+    if (data.id === this.game.registry.get('playerId')) return;
+    this.updateOtherPlayer({ id: data.id, position: data.position, direction: data.direction, state: data.state });
+  }
+
+  private removeOtherPlayer(id: string) {
+    const player = this.otherPlayers.get(id);
+    if (player && player.sprite) {
       player.sprite.destroy();
     }
-    this.otherPlayers.delete(playerId);
+    this.otherPlayers.delete(id);
   }
 
-  private setPlayerOffline(playerId: string) {
-    const player = this.otherPlayers.get(playerId);
-    if (!player || !player.sprite) return;
-
-    player.isOnline = false;
-    const offlineText = player.sprite.getAt(3) as Phaser.GameObjects.Text;
-    if (offlineText) {
-      offlineText.setText('[OFFLINE]');
-      offlineText.setVisible(true);
-    }
-    player.sprite.setAlpha(0.7);
-  }
-
-  private updateOtherPlayer(data: Partial<NetworkPlayer> & { id: string; isOnline?: boolean }) {
-    const player = this.otherPlayers.get(data.id);
-    if (!player || !player.sprite) return;
-
-    if (data.position) {
-      player.targetPosition = data.position;
-      player.lastUpdate = data.lastUpdate || Date.now();
-    }
-    if (data.direction) {
-      player.direction = data.direction;
-    }
-    if (data.state) {
-      player.state = data.state;
-    }
-    if (data.isOnline !== undefined) {
-      player.isOnline = data.isOnline;
-      const offlineText = player.sprite?.getAt(3) as Phaser.GameObjects.Text;
-      if (offlineText) {
-        offlineText.setVisible(!data.isOnline);
-      }
-      player.sprite?.setAlpha(data.isOnline ? 1 : 0.7);
-    }
-  }
-
-  update() {
+  update(time: number, delta: number) {
     if (!this.player || !this.player.body) return;
 
     this.interpolateOtherPlayers();
@@ -566,19 +390,47 @@ this.createPlayer();
       return;
     }
 
+    const playerPos = { x: this.player.x, y: this.player.y };
+
     this.handleMovement();
-    this.regionManager.update({ x: this.player.x, y: this.player.y });
-    this.worldCollision.update({ x: this.player.x, y: this.player.y });
-    this.interactionManager.update({ x: this.player.x, y: this.player.y });
-    this.minimap.update({ x: this.player.x, y: this.player.y }, this.direction);
-    this.worldMapUI.update({ x: this.player.x, y: this.player.y });
+    this.characterRenderer.update(time, delta, this.playerState, this.direction);
+    this.characterRenderer.setPosition(this.player.x, this.player.y);
+
+    this.regionManager.update(playerPos);
+    this.worldCollision.update(playerPos);
+    this.interactionManager.update(playerPos);
+    this.minimap.update(playerPos, this.direction);
+    this.worldMapUI.update(playerPos);
     this.audioManager.update(this.game.loop.delta);
+
+    // Open World Managers Update
+    const gameTime = getGameTime();
+    const formattedHour = gameTime.hour < 10 ? `0${gameTime.hour}` : `${gameTime.hour}`;
+    const minuteStr = gameTime.minute < 10 ? `0${gameTime.minute}` : `${gameTime.minute}`;
+    const timeStr = `${formattedHour}:${minuteStr}`;
+    const currentTimeMinutes = gameTime.hour * 60 + gameTime.minute;
+
+    this.environmentManager.update(time, delta, playerPos, timeStr);
+    this.landmarkManager.updatePlayerPosition(playerPos);
+    this.objectManager.updateCulling(playerPos);
+
+    // Feed current game time to the event manager
+    this.eventManager.setCurrentGameTime(currentTimeMinutes);
+    this.eventManager.update(playerPos);
+
+    this.npcManager.update(time, delta, timeStr, this.environmentManager.getCurrentWeather(), playerPos);
+
+    // Emit region changes for event manager hooks
+    const currentRegion = this.regionManager.getCurrentRegion();
+    if (currentRegion && currentRegion.id !== this.lastRegionId) {
+      this.lastRegionId = currentRegion.id;
+      if (this.emitter) this.emitter.emit('region_changed', currentRegion.id);
+    }
   }
 
   private updateHUD(): void {
     if (!this.hudElements) return;
 
-    // Update clock
     const gameTime = getGameTime();
     const formattedHour = gameTime.hour % 12 === 0 ? 12 : gameTime.hour % 12;
     const ampm = gameTime.hour >= 12 ? 'PM' : 'AM';
@@ -587,13 +439,11 @@ this.createPlayer();
     
     this.hudElements.clockText.setText(timeStr);
     
-    // Update region name
     const currentRegion = this.regionManager.getCurrentRegion();
     if (currentRegion) {
       this.hudElements.regionText.setText(currentRegion.displayName);
     }
 
-    // Update coordinates
     this.hudElements.coordText.setText(`X: ${Math.round(this.player.x)}  Y: ${Math.round(this.player.y)}`);
   }
 
@@ -621,11 +471,9 @@ this.createPlayer();
     const baseSpeed = PLAYER_SPEED;
     const sprintSpeed = PLAYER_SPEED * 1.7;
     const dodgeSpeed = PLAYER_SPEED * 3.5;
-    const acceleration = 1000;
     const drag = 1400;
     const dodgeCooldownMs = 800;
 
-    // Handle dodge cooldown
     if (this.dodgeCooldown > 0) {
       this.dodgeCooldown -= this.game.loop.delta;
     }
@@ -633,7 +481,6 @@ this.createPlayer();
     let inputX = 0;
     let inputY = 0;
 
-    // Determine input direction
     if (this.cursors.left.isDown || this.wasdKeys.A.isDown) {
       inputX = -1;
       this.direction = 'left';
@@ -650,28 +497,23 @@ this.createPlayer();
       if (inputX === 0) this.direction = 'down';
     }
 
-    // Normalize diagonal
     if (inputX !== 0 && inputY !== 0) {
       const len = Math.sqrt(inputX * inputX + inputY * inputY);
       inputX /= len;
       inputY /= len;
     }
 
-    // Check for dodge roll (Space)
-    const now = Date.now();
     const isDodgePressed = Phaser.Input.Keyboard.JustDown(this.dodgeKey);
     const canDodge = this.dodgeCooldown <= 0 && (inputX !== 0 || inputY !== 0) && !this.isDodging;
 
     if (isDodgePressed && canDodge) {
       this.performDodge(inputX, inputY, dodgeSpeed, dodgeCooldownMs);
-      return; // Skip normal movement this frame
+      return;
     }
 
-    // Sprint handling (Shift)
     this.isSprinting = this.sprintKey.isDown && (inputX !== 0 || inputY !== 0);
     const currentSpeed = this.isSprinting ? sprintSpeed : baseSpeed;
 
-    // Update dodge state
     if (this.isDodging) {
       this.dodgeCooldown -= this.game.loop.delta;
       if (this.dodgeCooldown <= 0) {
@@ -680,11 +522,9 @@ this.createPlayer();
       }
     }
 
-    // Apply acceleration/deceleration using physics body
     const body = this.player.body as Phaser.Physics.Arcade.Body;
     
     if (inputX !== 0 || inputY !== 0) {
-      // Accelerate towards target velocity
       const targetVX = inputX * currentSpeed;
       const targetVY = inputY * currentSpeed;
       
@@ -692,12 +532,10 @@ this.createPlayer();
       body.setDrag(drag, drag);
       body.setMaxVelocity(currentSpeed, currentSpeed);
     } else {
-      // Decelerate to stop
       body.setAcceleration(0, 0);
       body.setDrag(drag * 1.5, drag * 1.5);
     }
 
-    // Check collision after physics step
     const collisionResult = this.worldCollision.checkCollision({ 
       x: this.player.x, 
       y: this.player.y 
@@ -718,10 +556,8 @@ this.createPlayer();
       }
     }
 
-    // Update predicted position for server reconciliation
     this.predictedPosition = { x: this.player.x, y: this.player.y };
 
-    // Update player state
     const isMoving = Math.abs(body.velocity.x) > 10 || Math.abs(body.velocity.y) > 10;
     if (this.isDodging) {
       this.playerState = 'dodging';
@@ -731,13 +567,20 @@ this.createPlayer();
       this.playerState = 'idle';
     }
 
-    // Update dynamic camera
     this.dynamicCamera.update(this.game.loop.delta, { x: body.velocity.x, y: body.velocity.y }, currentSpeed);
 
-    // Send movement input to server (throttled)
     if (isMoving || this.playerState === 'idle') {
       this.sendMovementInput();
     }
+  }
+
+  private performDodge(dirX: number, dirY: number, dodgeSpeed: number, cooldownMs: number) {
+    this.isDodging = true;
+    this.dodgeCooldown = cooldownMs;
+    this.playerState = 'dodging';
+
+    const body = this.player.body as Phaser.Physics.Arcade.Body;
+    body.setVelocity(dirX * dodgeSpeed, dirY * dodgeSpeed);
   }
 
   private sendMovementInput() {
@@ -756,78 +599,23 @@ this.createPlayer();
     };
 
     this.movementBuffer.push(inputData);
-    if (this.movementBuffer.length > 10) {
+    if (this.movementBuffer.length > 20) {
       this.movementBuffer.shift();
     }
 
-    this.emitter.emit('player_move_input', inputData);
-  }
-
-  private performDodge(dirX: number, dirY: number, speed: number, cooldown: number): void {
-    this.isDodging = true;
-    this.dodgeCooldown = cooldown;
-    this.lastDodgeTime = Date.now();
-    this.dodgeDirection = this.direction;
-    this.playerState = 'dodging';
-
-    const body = this.player.body as Phaser.Physics.Arcade.Body;
-    
-    // Instant velocity for dodge
-    body.setVelocity(dirX * speed, dirY * speed);
-    body.setAcceleration(0, 0);
-    body.setDrag(800, 800); // Quick deceleration after dodge
-
-    // Visual feedback - flash and screen shake
-    this.dynamicCamera.shake(8, 150);
-    this.cameras.main.flash(100, 255, 255, 255, true);
-
-    // Dodge particles
-    this.createDodgeParticles();
-
-    // Invincibility frames during dodge (could be used for combat later)
-    this.player.setAlpha(0.6);
-    this.time.delayedCall(200, () => {
-      this.player.setAlpha(1);
-    });
-  }
-
-  private createDodgeParticles(): void {
-    const emitter = this.add.particles(this.player.x, this.player.y, '__DEFAULT', {
-      x: { min: -10, max: 10 },
-      y: { min: -10, max: 10 },
-      lifespan: 300,
-      speed: { min: 50, max: 150 },
-      scale: { start: 0.4, end: 0 },
-      alpha: { start: 0.6, end: 0 },
-      tint: 0xffffff,
-      quantity: 8,
-      blendMode: 'ADD',
-      emitting: false,
-    });
-    emitter.explode(8, this.player.x, this.player.y);
-    this.time.delayedCall(500, () => emitter.destroy());
+    this.emitter.emit('player_move', inputData);
   }
 
   private handleSitting() {
-    if (Phaser.Input.Keyboard.JustDown(this.interactionKey)) {
-      this.standUp();
+    const body = this.player.body as Phaser.Physics.Arcade.Body;
+    body.setVelocity(0, 0);
+    this.playerState = 'sitting';
+
+    if (this.cursors.left.isDown || this.cursors.right.isDown || 
+        this.cursors.up.isDown || this.cursors.down.isDown ||
+        this.wasdKeys.W.isDown || this.wasdKeys.A.isDown ||
+        this.wasdKeys.S.isDown || this.wasdKeys.D.isDown) {
+      this.playerState = 'idle';
     }
-  }
-
-  private standUp() {
-    this.playerState = 'idle';
-    this.interactionManager.forceHidePrompt();
-  }
-
-  destroy() {
-    this.worldRenderer.destroy();
-    this.regionManager.destroy();
-    this.worldCollision.destroy();
-    this.interactionManager.destroy();
-    this.minimap.destroy();
-    this.worldMapUI.destroy();
-    this.dynamicCamera?.destroy();
-    this.atmosphereManager?.destroy();
-    this.audioManager?.destroy();
   }
 }

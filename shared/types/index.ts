@@ -261,6 +261,75 @@ export interface InteractionEffect {
 }
 
 // ============================================================================
+// Open World & Systems Data Contracts
+// ============================================================================
+
+export type NPCBehaviorState =
+  | 'idle'
+  | 'walking'
+  | 'working'
+  | 'talking'
+  | 'eating'
+  | 'shopping'
+  | 'resting'
+  | 'sleeping'
+  | 'fleeing'
+  | 'investigating'
+  | 'travelling';
+
+export type WeatherType = 'clear' | 'cloudy' | 'rain' | 'storm' | 'fog' | 'snow';
+
+export type TimeOfDay = 'morning' | 'day' | 'evening' | 'night';
+
+export interface WorldChunk {
+  id: string;
+  gridX: number;
+  gridY: number;
+  bounds: { x: number; y: number; width: number; height: number };
+  regionId: string;
+  objectIds: string[];
+  landmarkIds: string[];
+  npcIds: string[];
+  isLoaded: boolean;
+}
+
+export interface WorldEvent {
+  id: string;
+  name: string;
+  description: string;
+  regionId?: string;
+  position: Vector2;
+  radius: number;
+  durationSeconds?: number;
+  activeWeather?: WeatherType;
+  requiredTimeOfDay?: TimeOfDay;
+  isActive?: boolean;
+  type:
+    | 'merchant'
+    | 'festival'
+    | 'npc_argument'
+    | 'lost_traveler'
+    | 'broken_cart'
+    | 'storm'
+    | 'wildlife'
+    | 'caravan'
+    | 'rare_resource'
+    | 'exploration'
+    | 'environmental'
+    | 'world'
+    | 'encounter'
+    | 'discovery';
+  data?: Record<string, unknown>;
+}
+
+export interface PlayerExplorationState {
+  discoveredRegions: string[];
+  discoveredLandmarks: string[];
+  discoveredLocations: string[];
+  explorationPercentage: number;
+}
+
+// ============================================================================
 // Multiplayer
 // ============================================================================
 
@@ -277,7 +346,7 @@ export interface NetworkPlayer {
 }
 
 export interface NetworkMessage {
-  type: 'player_join' | 'player_leave' | 'player_move' | 'player_state' | 'player_chat';
+  type: 'player_join' | 'player_leave' | 'player_move' | 'player_state' | 'player_chat' | 'world_event';
   payload: unknown;
   timestamp: number;
 }
@@ -293,6 +362,7 @@ export interface UIState {
   questLogOpen: boolean;
   inventoryOpen: boolean;
   settingsOpen: boolean;
+  worldMapOpen: boolean;
   interactionPrompt: InteractionPrompt | null;
 }
 
@@ -301,3 +371,4 @@ export interface InteractionPrompt {
   objectName: string;
   interactions: InteractionDefinition[];
 }
+

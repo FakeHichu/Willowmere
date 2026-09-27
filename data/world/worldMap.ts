@@ -6,8 +6,8 @@ import { regionEntrances, getRegionEntrances } from './entrances';
 import { collisionObjects, getCollisionObjectsInRegion, CollisionObject } from './collision';
 import { terrainDefinitions, TerrainType } from './terrain';
 
-export const OVERWORLD_WIDTH = 5000;
-export const OVERWORLD_HEIGHT = 4000;
+export const OVERWORLD_WIDTH = 6000;
+export const OVERWORLD_HEIGHT = 4500;
 export const TILE_SIZE = 32;
 
 export interface OverworldData {
@@ -27,8 +27,69 @@ export const overworldData: OverworldData = {
   regions,
   objects: worldObjects,
   collisionObjects,
-  defaultSpawnPoint: { x: 2000, y: 1750 },
+  defaultSpawnPoint: { x: 3000, y: 2300 },
 };
+
+// Deterministic Pseudo-Random Seed Generator for terrain blending
+function seededRandom(x: number, y: number, seed: number = 42): number {
+  const val = Math.sin(x * 12.9898 + y * 78.233 + seed) * 43758.5453;
+  return val - Math.floor(val);
+}
+
+export function getTerrainAtPosition(x: number, y: number): TerrainType {
+  const region = getRegionAtPosition({ x, y });
+  if (!region) return 'grass';
+
+  const regionTerrain = region.terrainPalette;
+  if (!regionTerrain || regionTerrain.length === 0) return 'grass';
+
+  // Seeded noise for terrain transition blending
+  const n = seededRandom(Math.floor(x / 128), Math.floor(y / 128));
+  const blendIndex = Math.floor(n * regionTerrain.length);
+
+  // Check if position is near river or lake
+  if (region.id === 'riverside' && Math.abs(x - 4900) < 180) {
+    return 'river';
+  }
+  if (region.id === 'lakeside' && y > 3600) {
+    return 'shallow_water';
+  }
+  if (region.id === 'northern_mountains' && y < -1000) {
+    return 'snow';
+  }
+  if (region.id === 'cave_underground') {
+    return 'cave_floor';
+  }
+
+  return regionTerrain[blendIndex % regionTerrain.length] || 'grass';
+}
+
+export function isPathAtPosition(x: number, y: number): boolean {
+  const region = getRegionAtPosition({ x, y });
+  if (!region) return false;
+
+  const entrances = getRegionEntrances(region.id);
+  for (const entrance of entrances) {
+    const dist = Math.sqrt(
+      Math.pow(entrance.position.x - x, 2) +
+      Math.pow(entrance.position.y - y, 2)
+    );
+    if (dist < 80) return true;
+  }
+
+  // Main village crossroad paths
+  if (region.id === 'village') {
+    if (Math.abs(y - 2300) < 40 && x > 2000 && x < 4000) return true;
+    if (Math.abs(x - 3000) < 40 && y > 1500 && y < 3100) return true;
+  }
+
+  // Farmland road
+  if (region.id === 'southern_farmland') {
+    if (Math.abs(y - 3400) < 32 && x > 200 && x < 2000) return true;
+  }
+
+  return false;
+}
 
 export function generateTerrainMap(): MapLayer {
   const widthInTiles = Math.ceil(OVERWORLD_WIDTH / TILE_SIZE);
@@ -84,72 +145,17 @@ export function generatePathMap(): MapLayer {
 
 function terrainTypeToIndex(type: TerrainType): number {
   const terrainTypes: TerrainType[] = [
-    'grass', 'dirt', 'forest_floor', 'stone', 'sand',
-    'shallow_water', 'deep_water', 'mountain', 'farmland',
-    'ruins', 'cave_floor', 'path', 'bridge',
+    'grass', 'dirt', 'forest_floor', 'stone', 'sand', 'mud',
+    'shallow_water', 'deep_water', 'river', 'cliff', 'mountain',
+    'farmland', 'ruins', 'cave_floor', 'path', 'bridge', 'snow',
   ];
   return terrainTypes.indexOf(type);
-}
-
-function indexToTerrainType(index: number): TerrainType {
-  const terrainTypes: TerrainType[] = [
-    'grass', 'dirt', 'forest_floor', 'stone', 'sand',
-    'shallow_water', 'deep_water', 'mountain', 'farmland',
-    'ruins', 'cave_floor', 'path', 'bridge',
-  ];
-  return terrainTypes[index] || 'grass';
-}
-
-export function getTerrainAtPosition(x: number, y: number): TerrainType {
-  const region = getRegionAtPosition({ x, y });
-  if (!region) return 'grass';
-
-  const regionTerrain = region.terrainPalette;
-  if (regionTerrain.length === 0) return 'grass';
-
-  const normalizedX = (x - region.bounds.x) / region.bounds.width;
-  const normalizedY = (y - region.bounds.y) / region.bounds.height;
-
-  const terrainIndex = Math.floor(
-    (normalizedX + normalizedY) * regionTerrain.length
-  ) % regionTerrain.length;
-
-  return regionTerrain[Math.max(0, terrainIndex)];
-}
-
-export function isPathAtPosition(x: number, y: number): boolean {
-  const region = getRegionAtPosition({ x, y });
-  if (!region) return false;
-
-  const entrances = getRegionEntrances(region.id);
-  for (const entrance of entrances) {
-    const dist = Math.sqrt(
-      Math.pow(entrance.position.x - x, 2) +
-      Math.pow(entrance.position.y - y, 2)
-    );
-    if (dist < 60) return true;
-  }
-
-  if (region.id === 'village') {
-    if (y > 1650 && y < 1750 && x > 1200 && x < 2800) return true;
-    if (x > 1950 && x < 2050 && y > 1000 && y < 2400) return true;
-  }
-
-  if (region.id === 'farmland') {
-    if (y > 1650 && y < 1750 && x > 400 && x < 1200) return true;
-  }
-
-  if (region.id === 'riverside') {
-    if (x > 2900 && x < 3000 && y > 1200 && y < 2800) return true;
-  }
-
-  return false;
 }
 
 export function getWorldMap(): WorldMap {
   return {
     id: 'map_overworld',
-    name: 'Willowmere Overworld',
+    name: 'Willowmere Open World',
     width: OVERWORLD_WIDTH,
     height: OVERWORLD_HEIGHT,
     tileSize: TILE_SIZE,
@@ -215,23 +221,23 @@ export function tileToWorld(tileX: number, tileY: number): Vector2 {
 
 export function isPositionInBounds(position: Vector2): boolean {
   return (
-    position.x >= 0 &&
+    position.x >= -400 &&
     position.x < OVERWORLD_WIDTH &&
-    position.y >= 0 &&
+    position.y >= -3500 &&
     position.y < OVERWORLD_HEIGHT
   );
 }
 
 export const WORLD_BOUNDS = {
-  x: 0,
-  y: 0,
-  width: OVERWORLD_WIDTH,
-  height: OVERWORLD_HEIGHT,
+  x: -400,
+  y: -3500,
+  width: OVERWORLD_WIDTH + 800,
+  height: OVERWORLD_HEIGHT + 4000,
 };
 
 export function clampToWorldBounds(position: Vector2, margin: number = 32): Vector2 {
   return {
-    x: Math.max(margin, Math.min(OVERWORLD_WIDTH - margin, position.x)),
-    y: Math.max(margin, Math.min(OVERWORLD_HEIGHT - margin, position.y)),
+    x: Math.max(WORLD_BOUNDS.x + margin, Math.min(WORLD_BOUNDS.x + WORLD_BOUNDS.width - margin, position.x)),
+    y: Math.max(WORLD_BOUNDS.y + margin, Math.min(WORLD_BOUNDS.y + WORLD_BOUNDS.height - margin, position.y)),
   };
 }

@@ -253,8 +253,8 @@ export function initializeSocketServer(httpServer: HttpServer) {
         player.state = moveResult.state;
         player.lastUpdate = Date.now();
 
-        // Broadcast authoritative position back to client & other players
-        io.emit('player_move', {
+        // Broadcast authoritative position to OTHER players (not the sender)
+        socket.broadcast.emit('player_move', {
           id: player.id,
           position: player.position,
           targetPosition: player.targetPosition,
