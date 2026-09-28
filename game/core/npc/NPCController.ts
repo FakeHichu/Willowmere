@@ -106,13 +106,13 @@ export class NPCController {
           Math.abs(scheduleGoal.position.y - this.currentGoalPosition.y) > 10)
       ) {
         this.currentGoalPosition = { ...scheduleGoal.position };
-        this.navigation.setDestination(pos, this.currentGoalPosition);
+        this.navigation.setDestination(pos, this.currentGoalPosition, 60);
         this.isWandering = false;
       }
     }
 
     // ── Navigation ───────────────────────────────────────────────────────────
-    const navResult = this.navigation.getNextMovement(pos, 80, deltaSec);
+    const navResult = this.navigation.getNextMovement(pos, deltaSec);
     this.renderer.setPosition(navResult.position.x, navResult.position.y);
     this.currentDirection = navResult.direction;
 
@@ -127,7 +127,7 @@ export class NPCController {
         // Wander around current goal position, not home position
         const wanderX = this.currentGoalPosition.x + Phaser.Math.Between(-IDLE_WANDER_RADIUS, IDLE_WANDER_RADIUS);
         const wanderY = this.currentGoalPosition.y + Phaser.Math.Between(-IDLE_WANDER_RADIUS, IDLE_WANDER_RADIUS);
-        this.navigation.setDestination(navResult.position, { x: wanderX, y: wanderY });
+        this.navigation.setDestination(navResult.position, { x: wanderX, y: wanderY }, 40);
       }
     } else {
       this.idleWanderTimer = 0;

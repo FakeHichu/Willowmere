@@ -9,7 +9,6 @@ import {
   WorldInteractionManager,
   Minimap,
   WorldMapUI,
-  AtmosphereManager,
   AudioManager,
   DynamicCamera,
   WorldChunkManager,
@@ -18,6 +17,7 @@ import {
   WorldObjectManager,
   EnvironmentManager,
   WorldEventManager,
+  ExplorationSystem,
 } from '../world';
 import { CharacterRenderer } from '../characters/CharacterRenderer';
 import { NPCManager } from '../npc/NPCManager';
@@ -59,7 +59,6 @@ export class VillageScene extends Phaser.Scene {
   private minimap!: Minimap;
   private worldMapUI!: WorldMapUI;
   private dynamicCamera!: DynamicCamera;
-  private atmosphereManager!: AtmosphereManager;
   private audioManager!: AudioManager;
   private chunkManager!: WorldChunkManager;
   private worldStreamer!: WorldStreamer;
@@ -70,6 +69,7 @@ export class VillageScene extends Phaser.Scene {
   private npcManager!: NPCManager;
   private characterRenderer!: CharacterRenderer;
   private progressionSystem!: ProgressionSystem;
+  private explorationSystem!: ExplorationSystem;
   private lastRegionId = 'village';
 
   private hudElements!: {
@@ -88,6 +88,9 @@ export class VillageScene extends Phaser.Scene {
   private isSprinting = false;
   private isDodging = false;
   private dodgeCooldown = 0;
+  private dodgeTimer = 0;
+  private lastInputX = 0;
+  private lastInputY = 0;
 
   constructor() {
     super({ key: 'VillageScene' });
@@ -126,9 +129,6 @@ export class VillageScene extends Phaser.Scene {
     this.worldMapUI = new WorldMapUI(this);
     this.worldMapUI.create();
 
-    this.atmosphereManager = new AtmosphereManager(this);
-    this.atmosphereManager.create();
-
     this.audioManager = new AudioManager(this);
     this.audioManager.create();
 
@@ -137,6 +137,7 @@ export class VillageScene extends Phaser.Scene {
     this.chunkManager.create();
 
     this.worldStreamer = new WorldStreamer(this);
+    this.worldStreamer.setWorldRenderer(this.worldRenderer);
     this.worldStreamer.create();
 
     this.landmarkManager = new LandmarkManager(this, this.emitter!);
@@ -155,6 +156,9 @@ export class VillageScene extends Phaser.Scene {
 
     this.progressionSystem = new ProgressionSystem(this);
 
+    this.explorationSystem = new ExplorationSystem(this);
+    this.setupExplorationCallbacks();
+
     this.createPlayer();
     this.setupCamera();
     this.setupControls();
@@ -163,10 +167,27 @@ export class VillageScene extends Phaser.Scene {
     this.syncDiscoveredState();
   }
 
+  private setupExplorationCallbacks(): void {
+    this.explorationSystem.onDiscovery((type, id, name) => {
+      if (type === 'region') {
+        this.minimap.discoverRegion(id);
+        this.worldMapUI.discoverRegion(id);
+        this.regionManager.discoverRegion(id);
+      } else if (type === 'landmark') {
+        this.minimap.discoverLandmark(id);
+        this.worldMapUI.discoverLandmark(id);
+      }
+    });
+  }
+
   private syncDiscoveredState(): void {
     const discoveredRegions = this.regionManager.getDiscoveredRegions();
     this.minimap.setDiscoveredRegions(discoveredRegions);
     this.worldMapUI.setDiscoveredRegions(discoveredRegions);
+
+    const discoveredLandmarks = this.landmarkManager.getDiscoveredLandmarkIds();
+    this.minimap.setDiscoveredLandmarks(discoveredLandmarks);
+    this.worldMapUI.setDiscoveredLandmarks(discoveredLandmarks);
   }
 
   private createPlayer() {
@@ -219,9 +240,7 @@ export class VillageScene extends Phaser.Scene {
     this.sprintKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SHIFT);
     this.dodgeKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
 
-    this.interactionKey.on('down', () => {
-      this.interactionManager.triggerInteraction({ x: this.player.x, y: this.player.y });
-    });
+    // Interaction handled by WorldInteractionManager.update() to avoid double-trigger
 
     const mapKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.M);
     mapKey.on('down', () => {
@@ -410,6 +429,10 @@ export class VillageScene extends Phaser.Scene {
     const timeStr = `${formattedHour}:${minuteStr}`;
     const currentTimeMinutes = gameTime.hour * 60 + gameTime.minute;
 
+    // Update chunk-based world streaming
+    this.worldRenderer.updateCameraView(this.cameras.main);
+    this.worldStreamer.update(playerPos);
+
     this.environmentManager.update(time, delta, playerPos, timeStr);
     this.landmarkManager.updatePlayerPosition(playerPos);
     this.objectManager.updateCulling(playerPos);
@@ -444,7 +467,10 @@ export class VillageScene extends Phaser.Scene {
       this.hudElements.regionText.setText(currentRegion.displayName);
     }
 
-    this.hudElements.coordText.setText(`X: ${Math.round(this.player.x)}  Y: ${Math.round(this.player.y)}`);
+    const explorationProgress = this.explorationSystem.getProgress();
+    this.hudElements.coordText.setText(
+      `X: ${Math.round(this.player.x)}  Y: ${Math.round(this.player.y)}  |  Explored: ${explorationProgress.percentage}%`
+    );
   }
 
   private interpolateOtherPlayers() {
@@ -470,12 +496,16 @@ export class VillageScene extends Phaser.Scene {
   private handleMovement() {
     const baseSpeed = PLAYER_SPEED;
     const sprintSpeed = PLAYER_SPEED * 1.7;
-    const dodgeSpeed = PLAYER_SPEED * 3.5;
+    const dodgeSpeed = PLAYER_SPEED * 4.0;
     const drag = 1400;
-    const dodgeCooldownMs = 800;
+    const dodgeCooldownMs = 600;
+    const dodgeDurationMs = 250;
 
     if (this.dodgeCooldown > 0) {
       this.dodgeCooldown -= this.game.loop.delta;
+    }
+    if (this.dodgeTimer > 0) {
+      this.dodgeTimer -= this.game.loop.delta;
     }
 
     let inputX = 0;
@@ -503,28 +533,37 @@ export class VillageScene extends Phaser.Scene {
       inputY /= len;
     }
 
+    // Dodge input - allow dodge in place (use last movement direction if no input)
     const isDodgePressed = Phaser.Input.Keyboard.JustDown(this.dodgeKey);
-    const canDodge = this.dodgeCooldown <= 0 && (inputX !== 0 || inputY !== 0) && !this.isDodging;
+    const lastMoveDirX = this.lastInputX !== 0 || this.lastInputY !== 0 ? this.lastInputX : (inputX || 0);
+    const lastMoveDirY = this.lastInputX !== 0 || this.lastInputY !== 0 ? this.lastInputY : (inputY || 0);
+    const canDodge = this.dodgeCooldown <= 0 && !this.isDodging;
 
     if (isDodgePressed && canDodge) {
-      this.performDodge(inputX, inputY, dodgeSpeed, dodgeCooldownMs);
-      return;
+      const dodgeDirX = inputX !== 0 || inputY !== 0 ? inputX : lastMoveDirX;
+      const dodgeDirY = inputX !== 0 || inputY !== 0 ? inputY : lastMoveDirY;
+      this.performDodge(dodgeDirX, dodgeDirY, dodgeSpeed, dodgeCooldownMs, dodgeDurationMs);
+    }
+
+    // Store last input for dodge direction
+    if (inputX !== 0 || inputY !== 0) {
+      this.lastInputX = inputX;
+      this.lastInputY = inputY;
     }
 
     this.isSprinting = this.sprintKey.isDown && (inputX !== 0 || inputY !== 0);
     const currentSpeed = this.isSprinting ? sprintSpeed : baseSpeed;
 
-    if (this.isDodging) {
-      this.dodgeCooldown -= this.game.loop.delta;
-      if (this.dodgeCooldown <= 0) {
-        this.isDodging = false;
-        this.playerState = 'walking';
-      }
-    }
-
     const body = this.player.body as Phaser.Physics.Arcade.Body;
-    
-    if (inputX !== 0 || inputY !== 0) {
+
+    if (this.isDodging) {
+      // During dodge: maintain velocity, no acceleration/drag changes
+      this.dodgeTimer -= this.game.loop.delta;
+      if (this.dodgeTimer <= 0) {
+        this.isDodging = false;
+        this.dodgeCooldown = dodgeCooldownMs;
+      }
+    } else if (inputX !== 0 || inputY !== 0) {
       const targetVX = inputX * currentSpeed;
       const targetVY = inputY * currentSpeed;
       
@@ -569,18 +608,21 @@ export class VillageScene extends Phaser.Scene {
 
     this.dynamicCamera.update(this.game.loop.delta, { x: body.velocity.x, y: body.velocity.y }, currentSpeed);
 
-    if (isMoving || this.playerState === 'idle') {
+    if (isMoving || this.playerState === 'idle' || this.isDodging) {
       this.sendMovementInput();
     }
   }
 
-  private performDodge(dirX: number, dirY: number, dodgeSpeed: number, cooldownMs: number) {
+  private performDodge(dirX: number, dirY: number, dodgeSpeed: number, cooldownMs: number, durationMs: number) {
     this.isDodging = true;
+    this.dodgeTimer = durationMs;
     this.dodgeCooldown = cooldownMs;
     this.playerState = 'dodging';
 
     const body = this.player.body as Phaser.Physics.Arcade.Body;
-    body.setVelocity(dirX * dodgeSpeed, dirY * dodgeSpeed);
+    // Normalize direction for dodge
+    const len = Math.sqrt(dirX * dirX + dirY * dirY) || 1;
+    body.setVelocity((dirX / len) * dodgeSpeed, (dirY / len) * dodgeSpeed);
   }
 
   private sendMovementInput() {

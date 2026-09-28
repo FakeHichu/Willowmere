@@ -32,6 +32,13 @@ export class WorldMapUI {
   private dragStart = { x: 0, y: 0 };
   private mapKey!: Phaser.Input.Keyboard.Key;
 
+  private worldMinX = WORLD_BOUNDS.x;
+  private worldMaxX = WORLD_BOUNDS.x + WORLD_BOUNDS.width;
+  private worldMinY = WORLD_BOUNDS.y;
+  private worldMaxY = WORLD_BOUNDS.y + WORLD_BOUNDS.height;
+  private worldWidth = WORLD_BOUNDS.width;
+  private worldHeight = WORLD_BOUNDS.height;
+
   constructor(scene: Phaser.Scene, config?: Partial<WorldMapConfig>) {
     this.scene = scene;
     this.config = {
@@ -102,11 +109,19 @@ export class WorldMapUI {
   }
 
   private clampMapOffset(): void {
-    const mapWidth = WORLD_BOUNDS.width * this.currentZoom * 0.1;
-    const mapHeight = WORLD_BOUNDS.height * this.currentZoom * 0.1;
+    const mapWidth = this.worldWidth * this.currentZoom * 0.1;
+    const mapHeight = this.worldHeight * this.currentZoom * 0.1;
 
     this.mapOffset.x = Phaser.Math.Clamp(this.mapOffset.x, -mapWidth / 2, mapWidth / 2);
     this.mapOffset.y = Phaser.Math.Clamp(this.mapOffset.y, -mapHeight / 2, mapHeight / 2);
+  }
+
+  private worldToMap(worldX: number, worldY: number): { x: number; y: number } {
+    const scale = 0.1 * this.currentZoom;
+    return {
+      x: (worldX - this.worldMinX) * scale + this.mapOffset.x,
+      y: (worldY - this.worldMinY) * scale + this.mapOffset.y,
+    };
   }
 
   private renderMap(): void {
@@ -114,39 +129,35 @@ export class WorldMapUI {
     this.markerGraphics.clear();
     this.labelContainer.removeAll(true);
 
-    const scale = 0.1 * this.currentZoom;
-    const centerX = this.mapOffset.x;
-    const centerY = this.mapOffset.y;
-
-    this.drawRegionBoundaries(scale, centerX, centerY);
-    this.drawRoads(scale, centerX, centerY);
-    this.drawLandmarks(scale, centerX, centerY);
-    this.drawBuildings(scale, centerX, centerY);
-    this.drawEntrances(scale, centerX, centerY);
-    this.drawQuestMarkers(scale, centerX, centerY);
-    this.drawPlayerMarker(scale, centerX, centerY);
-    this.drawOtherPlayers(scale, centerX, centerY);
+    this.drawRegionBoundaries();
+    this.drawRoads();
+    this.drawLandmarks();
+    this.drawBuildings();
+    this.drawEntrances();
+    this.drawQuestMarkers();
+    this.drawPlayerMarker();
+    this.drawOtherPlayers();
   }
 
-  private drawRegionBoundaries(scale: number, cx: number, cy: number): void {
+  private drawRegionBoundaries(): void {
     for (const region of regions) {
       if (!this.discoveredRegions.has(region.id) && region.id !== 'village') continue;
 
-      const rx = (region.bounds.x - WORLD_BOUNDS.width / 2) * scale + cx;
-      const ry = (region.bounds.y - WORLD_BOUNDS.height / 2) * scale + cy;
-      const rw = region.bounds.width * scale;
-      const rh = region.bounds.height * scale;
+      const pos1 = this.worldToMap(region.bounds.x, region.bounds.y);
+      const pos2 = this.worldToMap(region.bounds.x + region.bounds.width, region.bounds.y + region.bounds.height);
+      const rw = pos2.x - pos1.x;
+      const rh = pos2.y - pos1.y;
 
       const discovered = this.discoveredRegions.has(region.id);
       const alpha = discovered ? 0.3 : 0.1;
 
       this.mapGraphics.fillStyle(this.parseColor(region.ambientColor), alpha);
-      this.mapGraphics.fillRect(rx, ry, rw, rh);
+      this.mapGraphics.fillRect(pos1.x, pos1.y, rw, rh);
 
       this.mapGraphics.lineStyle(2, discovered ? 0x8d6e63 : 0x555555, 0.8);
-      this.mapGraphics.strokeRect(rx, ry, rw, rh);
+      this.mapGraphics.strokeRect(pos1.x, pos1.y, rw, rh);
 
-      const label = this.scene.add.text(rx + rw / 2, ry + 15, region.displayName, {
+      const label = this.scene.add.text(pos1.x + rw / 2, pos1.y + 15, region.displayName, {
         fontSize: `${Math.max(10, 14 * this.currentZoom)}px`,
         color: discovered ? '#ffd700' : '#666666',
         fontFamily: 'Georgia, serif',
@@ -156,7 +167,7 @@ export class WorldMapUI {
     }
   }
 
-  private drawRoads(scale: number, cx: number, cy: number): void {
+  private drawRoads(): void {
     this.mapGraphics.lineStyle(3, 0x8d6e63, 0.8);
 
     for (const entrance of regionEntrances) {
@@ -166,19 +177,23 @@ export class WorldMapUI {
       const toRegion = regions.find(r => r.id === entrance.toRegion);
       if (!fromRegion || !toRegion) continue;
 
-      const fx = (fromRegion.bounds.x + fromRegion.bounds.width / 2 - WORLD_BOUNDS.width / 2) * scale + cx;
-      const fy = (fromRegion.bounds.y + fromRegion.bounds.height / 2 - WORLD_BOUNDS.height / 2) * scale + cy;
-      const tx = (toRegion.bounds.x + toRegion.bounds.width / 2 - WORLD_BOUNDS.width / 2) * scale + cx;
-      const ty = (toRegion.bounds.y + toRegion.bounds.height / 2 - WORLD_BOUNDS.height / 2) * scale + cy;
+      const fromCenter = this.worldToMap(
+        fromRegion.bounds.x + fromRegion.bounds.width / 2,
+        fromRegion.bounds.y + fromRegion.bounds.height / 2
+      );
+      const toCenter = this.worldToMap(
+        toRegion.bounds.x + toRegion.bounds.width / 2,
+        toRegion.bounds.y + toRegion.bounds.height / 2
+      );
 
       this.mapGraphics.beginPath();
-      this.mapGraphics.moveTo(fx, fy);
-      this.mapGraphics.lineTo(tx, ty);
+      this.mapGraphics.moveTo(fromCenter.x, fromCenter.y);
+      this.mapGraphics.lineTo(toCenter.x, toCenter.y);
       this.mapGraphics.strokePath();
     }
   }
 
-  private drawLandmarks(scale: number, cx: number, cy: number): void {
+  private drawLandmarks(): void {
     for (const region of regions) {
       if (!this.discoveredRegions.has(region.id) && region.id !== 'village') continue;
 
@@ -187,17 +202,16 @@ export class WorldMapUI {
         const discovered = landmark.discovered || this.discoveredLandmarks.has(landmark.id);
         if (!discovered && landmark.type !== 'building') continue;
 
-        const lx = (landmark.position.x - WORLD_BOUNDS.width / 2) * scale + cx;
-        const ly = (landmark.position.y - WORLD_BOUNDS.height / 2) * scale + cy;
+        const pos = this.worldToMap(landmark.position.x, landmark.position.y);
 
         const color = this.getLandmarkColor(landmark.type);
         this.markerGraphics.fillStyle(color, 1);
-        this.markerGraphics.fillCircle(lx, ly, 5 * this.currentZoom);
+        this.markerGraphics.fillCircle(pos.x, pos.y, 5 * this.currentZoom);
         this.markerGraphics.lineStyle(1, 0x000000, 1);
-        this.markerGraphics.strokeCircle(lx, ly, 5 * this.currentZoom);
+        this.markerGraphics.strokeCircle(pos.x, pos.y, 5 * this.currentZoom);
 
         if (this.currentZoom > 1.2) {
-          const label = this.scene.add.text(lx, ly - 15, landmark.name, {
+          const label = this.scene.add.text(pos.x, pos.y - 15, landmark.name, {
             fontSize: `${Math.max(8, 10 * this.currentZoom)}px`,
             color: '#ffffff',
             fontFamily: 'Georgia, serif',
@@ -210,81 +224,69 @@ export class WorldMapUI {
     }
   }
 
-  private drawBuildings(scale: number, cx: number, cy: number): void {
+  private drawBuildings(): void {
     for (const obj of worldObjects) {
       if (obj.type !== 'building') continue;
 
-      const bx = (obj.position.x - WORLD_BOUNDS.width / 2) * scale + cx;
-      const by = (obj.position.y - WORLD_BOUNDS.height / 2) * scale + cy;
-      const bw = obj.size.x * scale;
-      const bh = obj.size.y * scale;
+      const pos1 = this.worldToMap(obj.position.x, obj.position.y);
+      const pos2 = this.worldToMap(obj.position.x + obj.size.x, obj.position.y + obj.size.y);
+      const bw = pos2.x - pos1.x;
+      const bh = pos2.y - pos1.y;
 
       this.markerGraphics.fillStyle(0x8d6e63, 1);
-      this.markerGraphics.fillRect(bx - bw / 2, by - bh / 2, bw, bh);
+      this.markerGraphics.fillRect(pos1.x - bw / 2, pos1.y - bh / 2, bw, bh);
       this.markerGraphics.lineStyle(1, 0x5d4037, 1);
-      this.markerGraphics.strokeRect(bx - bw / 2, by - bh / 2, bw, bh);
+      this.markerGraphics.strokeRect(pos1.x - bw / 2, pos1.y - bh / 2, bw, bh);
     }
   }
 
-  private drawEntrances(scale: number, cx: number, cy: number): void {
+  private drawEntrances(): void {
     for (const entrance of regionEntrances) {
       if (!entrance.discovered) continue;
 
-      const ex = (entrance.position.x - WORLD_BOUNDS.width / 2) * scale + cx;
-      const ey = (entrance.position.y - WORLD_BOUNDS.height / 2) * scale + cy;
+      const pos = this.worldToMap(entrance.position.x, entrance.position.y);
 
       this.markerGraphics.fillStyle(0x4fc3f7, 1);
-      this.markerGraphics.fillCircle(ex, ey, 4 * this.currentZoom);
+      this.markerGraphics.fillCircle(pos.x, pos.y, 4 * this.currentZoom);
       this.markerGraphics.lineStyle(1, 0x000000, 1);
-      this.markerGraphics.strokeCircle(ex, ey, 4 * this.currentZoom);
+      this.markerGraphics.strokeCircle(pos.x, pos.y, 4 * this.currentZoom);
     }
   }
 
-  private drawQuestMarkers(scale: number, cx: number, cy: number): void {
+  private drawQuestMarkers(): void {
     for (const quest of this.activeQuests) {
       for (const step of quest.steps) {
         if (step.type === 'reach' && step.targetPosition) {
-          const qx = (step.targetPosition.x - WORLD_BOUNDS.width / 2) * scale + cx;
-          const qy = (step.targetPosition.y - WORLD_BOUNDS.height / 2) * scale + cy;
+          const pos = this.worldToMap(step.targetPosition.x, step.targetPosition.y);
 
           this.markerGraphics.fillStyle(0xe91e63, 1);
-          this.markerGraphics.fillCircle(qx, qy, 6 * this.currentZoom);
+          this.markerGraphics.fillCircle(pos.x, pos.y, 6 * this.currentZoom);
           this.markerGraphics.lineStyle(2, 0xffffff, 1);
-          this.markerGraphics.strokeCircle(qx, qy, 6 * this.currentZoom);
-
-          const pulse = this.scene.tweens.add({
-            targets: this.markerGraphics,
-            alpha: { from: 1, to: 0.5 },
-            duration: 1000,
-            yoyo: true,
-            repeat: -1,
-          });
+          this.markerGraphics.strokeCircle(pos.x, pos.y, 6 * this.currentZoom);
         }
       }
     }
   }
 
-  private drawPlayerMarker(scale: number, cx: number, cy: number): void {
-    const px = (this.playerPosition.x - WORLD_BOUNDS.width / 2) * scale + cx;
-    const py = (this.playerPosition.y - WORLD_BOUNDS.height / 2) * scale + cy;
+  private drawPlayerMarker(): void {
+    const pos = this.worldToMap(this.playerPosition.x, this.playerPosition.y);
 
     this.markerGraphics.fillStyle(0xffd700, 1);
-    this.markerGraphics.fillCircle(px, py, 6 * this.currentZoom);
+    this.markerGraphics.fillCircle(pos.x, pos.y, 6 * this.currentZoom);
     this.markerGraphics.lineStyle(2, 0x000000, 1);
-    this.markerGraphics.strokeCircle(px, py, 6 * this.currentZoom);
+    this.markerGraphics.strokeCircle(pos.x, pos.y, 6 * this.currentZoom);
 
     this.markerGraphics.fillStyle(0x000000, 1);
-    this.markerGraphics.fillCircle(px, py, 2 * this.currentZoom);
+    this.markerGraphics.fillCircle(pos.x, pos.y, 2 * this.currentZoom);
   }
 
-  private drawOtherPlayers(scale: number, cx: number, cy: number): void {
+  private drawOtherPlayers(): void {
     this.markerGraphics.fillStyle(0x4fc3f7, 1);
     for (const [, pos] of this.otherPlayers) {
-      const ox = (pos.x - WORLD_BOUNDS.width / 2) * scale + cx;
-      const oy = (pos.y - WORLD_BOUNDS.height / 2) * scale + cy;
-      this.markerGraphics.fillCircle(ox, oy, 4 * this.currentZoom);
+      const mapPos = this.worldToMap(pos.x, pos.y);
+      this.markerGraphics.fillCircle(mapPos.x, mapPos.y, 4 * this.currentZoom);
       this.markerGraphics.lineStyle(1, 0x000000, 1);
-      this.markerGraphics.strokeCircle(ox, oy, 4 * this.currentZoom);
+      this.markerGraphics.strokeCircle(mapPos.x, mapPos.y, 4 * this.currentZoom);
     }
   }
 

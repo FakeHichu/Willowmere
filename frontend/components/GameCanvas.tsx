@@ -69,7 +69,7 @@ export function GameCanvas({
     });
 
     socketRef.current.on('player_move', (moveData: unknown) => {
-      emitterRef.current?.emit('server_player_move', moveData);
+      emitterRef.current?.emit('player_move', moveData);
     });
 
     socketRef.current.on('npc_update', (npcData: unknown) => {

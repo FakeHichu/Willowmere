@@ -8,23 +8,34 @@ import {
 } from '@data/world/worldMap';
 import { terrainDefinitions, TerrainType } from '@data/world/terrain';
 import { regions, getRegionAtPosition } from '@data/world/regions';
+import { CHUNK_SIZE, WORLD_GRID_COLS, WORLD_GRID_ROWS, generateWorldChunks, WorldChunk } from '@data/world/chunks';
+
+export interface ChunkTilemapData {
+  chunk: WorldChunk;
+  tilemap: Phaser.Tilemaps.Tilemap;
+  terrainLayer: Phaser.Tilemaps.TilemapLayer;
+  pathLayer: Phaser.Tilemaps.TilemapLayer | null;
+  detailLayer: Phaser.Tilemaps.TilemapLayer | null;
+}
 
 export class WorldRenderer {
   private scene: Phaser.Scene;
-  private terrainLayer: Phaser.Tilemaps.TilemapLayer | null = null;
-  private pathLayer: Phaser.Tilemaps.TilemapLayer | null = null;
-  private detailLayer: Phaser.Tilemaps.TilemapLayer | null = null;
-  private tilemap: Phaser.Tilemaps.Tilemap | null = null;
   private terrainTilesetTexture?: Phaser.Textures.Texture;
   private pathTexture?: Phaser.Textures.Texture;
   private generatedTextures = false;
 
-  // Terrain type to tile index mapping (matches the order in the combined texture)
+  private chunks: WorldChunk[] = [];
+  private activeChunkTilemaps: Map<string, ChunkTilemapData> = new Map();
+  private chunkPool: ChunkTilemapData[] = [];
+  private maxActiveChunks = 16;
+
   private readonly terrainTypes: TerrainType[] = [
     'grass', 'dirt', 'forest_floor', 'stone', 'sand',
     'shallow_water', 'deep_water', 'mountain', 'farmland',
     'ruins', 'cave_floor', 'path', 'bridge',
   ];
+
+  private cameraViewPadding = 800;
 
   constructor(scene: Phaser.Scene) {
     this.scene = scene;
@@ -32,15 +43,12 @@ export class WorldRenderer {
 
   async create(): Promise<void> {
     this.generateTerrainTextures();
-    this.createTilemap();
-    this.createLayers();
+    this.chunks = generateWorldChunks();
   }
 
-private generateTerrainTextures(): void {
+  private generateTerrainTextures(): void {
     if (this.generatedTextures) return;
 
-    // Create a combined texture atlas with all terrain types as frames
-    // Each frame is TILE_SIZE x TILE_SIZE, arranged in a grid
     const cols = 7;
     const rows = Math.ceil(this.terrainTypes.length / cols);
     const atlasWidth = cols * TILE_SIZE;
@@ -48,7 +56,6 @@ private generateTerrainTextures(): void {
 
     const graphics = this.scene.add.graphics({ x: 0, y: 0 });
 
-    // Draw each terrain type into the atlas
     this.terrainTypes.forEach((type, index) => {
       const col = index % cols;
       const row = Math.floor(index / cols);
@@ -58,37 +65,28 @@ private generateTerrainTextures(): void {
       const def = terrainDefinitions[type];
       graphics.fillStyle(def.color, 1);
       graphics.fillRect(x, y, TILE_SIZE, TILE_SIZE);
-
-      // Add variation
       this.addTerrainVariationToAtlas(graphics, type, x, y);
     });
 
-    // Generate the combined texture
     const textureKey = 'terrain_atlas';
     graphics.generateTexture(textureKey, atlasWidth, atlasHeight);
     this.terrainTilesetTexture = this.scene.textures.get(textureKey);
     graphics.destroy();
 
-    // IMPORTANT: Add frames to the texture for each terrain type
-    // This allows the tilemap to use frame indices for different terrain types
     const texture = this.scene.textures.get(textureKey);
     if (texture) {
       const source = texture.getSourceImage() as HTMLCanvasElement;
       if (source) {
-        // Add frames with numeric indices as names (0, 1, 2, ...)
         this.terrainTypes.forEach((type, index) => {
           const col = index % 7;
           const row = Math.floor(index / 7);
           const x = col * TILE_SIZE;
           const y = row * TILE_SIZE;
-          
-          // Add frame with numeric index as name
           texture.add(index.toString(), 0, x, y, TILE_SIZE, TILE_SIZE);
         });
       }
     }
 
-    // Create path texture
     this.createPathTexture();
     this.generatedTextures = true;
   }
@@ -168,142 +166,145 @@ private generateTerrainTextures(): void {
 
     graphics.generateTexture(textureKey, TILE_SIZE, TILE_SIZE);
     this.pathTexture = this.scene.textures.get(textureKey);
-    
-    // Add frame for path texture
+
     const texture = this.scene.textures.get(textureKey);
     if (texture) {
       texture.add('path', 0, 0, 0, TILE_SIZE, TILE_SIZE);
       texture.add('0', 0, 0, 0, TILE_SIZE, TILE_SIZE);
     }
-    
+
     graphics.destroy();
   }
 
-  private createTilemap(): void {
+  updateCameraView(camera: Phaser.Cameras.Scene2D.Camera): void {
+    const camX = camera.scrollX;
+    const camY = camera.scrollY;
+    const camWidth = camera.width / camera.zoom;
+    const camHeight = camera.height / camera.zoom;
+
+    const minX = camX - this.cameraViewPadding;
+    const maxX = camX + camWidth + this.cameraViewPadding;
+    const minY = camY - this.cameraViewPadding;
+    const maxY = camY + camHeight + this.cameraViewPadding;
+
+    const chunksToLoad: WorldChunk[] = [];
+
+    for (const chunk of this.chunks) {
+      if (chunk.bounds.x + chunk.bounds.width < minX ||
+          chunk.bounds.x > maxX ||
+          chunk.bounds.y + chunk.bounds.height < minY ||
+          chunk.bounds.y > maxY) {
+        continue;
+      }
+      chunksToLoad.push(chunk);
+    }
+
+    this.loadChunks(chunksToLoad);
+    this.unloadChunks(minX, maxX, minY, maxY);
+  }
+
+  private loadChunks(chunksToLoad: WorldChunk[]): void {
+    for (const chunk of chunksToLoad) {
+      if (this.activeChunkTilemaps.has(chunk.id)) continue;
+
+      if (this.activeChunkTilemaps.size >= this.maxActiveChunks) {
+        this.unloadOldestChunk();
+      }
+
+      const tilemapData = this.createChunkTilemap(chunk);
+      this.activeChunkTilemaps.set(chunk.id, tilemapData);
+      chunk.isLoaded = true;
+    }
+  }
+
+  private createChunkTilemap(chunk: WorldChunk): ChunkTilemapData {
+    let tilemapData: ChunkTilemapData;
+
+    if (this.chunkPool.length > 0) {
+      tilemapData = this.chunkPool.pop()!;
+      tilemapData.chunk = chunk;
+      tilemapData.tilemap.destroy();
+      tilemapData.terrainLayer?.destroy();
+      tilemapData.pathLayer?.destroy();
+      tilemapData.detailLayer?.destroy();
+    } else {
+      tilemapData = {
+        chunk,
+        tilemap: null as unknown as Phaser.Tilemaps.Tilemap,
+        terrainLayer: null as unknown as Phaser.Tilemaps.TilemapLayer,
+        pathLayer: null,
+        detailLayer: null,
+      };
+    }
+
+    const tilesX = Math.ceil(chunk.bounds.width / TILE_SIZE);
+    const tilesY = Math.ceil(chunk.bounds.height / TILE_SIZE);
+
     const map = this.scene.make.tilemap({
       tileWidth: TILE_SIZE,
       tileHeight: TILE_SIZE,
-      width: WORLD_BOUNDS.width / TILE_SIZE,
-      height: WORLD_BOUNDS.height / TILE_SIZE,
+      width: tilesX,
+      height: tilesY,
     });
 
-    this.tilemap = map;
-
-    // Add the combined terrain atlas as a single tileset FIRST
-    // We need to specify tileWidth/tileHeight so Phaser knows how to slice the atlas
     if (this.terrainTilesetTexture) {
-      const tileset = map.addTilesetImage('terrain_atlas', this.terrainTilesetTexture.key, TILE_SIZE, TILE_SIZE, 0, 0);
-      console.log('[WorldRenderer] Added terrain_atlas tileset:', tileset ? 'OK' : 'FAILED', '| tileset name:', tileset?.name, '| firstgid:', tileset?.firstgid);
-    } else {
-      console.error('[WorldRenderer] terrainTilesetTexture not available!');
+      map.addTilesetImage('terrain_atlas', this.terrainTilesetTexture.key, TILE_SIZE, TILE_SIZE, 0, 0);
     }
-
     if (this.pathTexture) {
-      const tileset = map.addTilesetImage('terrain_path', this.pathTexture.key, TILE_SIZE, TILE_SIZE, 0, 0);
-      console.log('[WorldRenderer] Added terrain_path tileset:', tileset ? 'OK' : 'FAILED', '| tileset name:', tileset?.name, '| firstgid:', tileset?.firstgid);
+      map.addTilesetImage('terrain_path', this.pathTexture.key, TILE_SIZE, TILE_SIZE, 0, 0);
     }
 
-    console.log('[WorldRenderer] Available tilesets after add:', map.tilesets.map(t => ({ name: t.name, firstgid: t.firstgid, tileWidth: t.tileWidth, tileHeight: t.tileHeight })));
-
-    // Create layers AFTER tilesets are added
-    this.createLayers();
-  }
-
-  private createLayers(): void {
-    if (!this.tilemap) return;
-
-    console.log('[WorldRenderer] All tilesets in map:', this.tilemap.tilesets.map(t => ({ name: t.name, firstgid: t.firstgid })));
-
-    // Get the tilesets that were added
-    const terrainTileset = this.tilemap.tilesets.find(t => t.name === 'terrain_atlas');
-    const pathTileset = this.tilemap.tilesets.find(t => t.name === 'terrain_path');
-
-    console.log('[WorldRenderer] Found terrain_atlas:', terrainTileset ? 'YES' : 'NO', '| object:', terrainTileset ? { name: terrainTileset.name, firstgid: terrainTileset.firstgid, columns: terrainTileset.columns, totalFrames: terrainTileset.total } : null);
-    console.log('[WorldRenderer] Found terrain_path:', pathTileset ? 'YES' : 'NO', '| object:', pathTileset ? { name: pathTileset.name, firstgid: pathTileset.firstgid, total: pathTileset.total } : null);
+    const terrainTileset = map.tilesets.find(t => t.name === 'terrain_atlas');
+    const pathTileset = map.tilesets.find(t => t.name === 'terrain_path');
 
     if (!terrainTileset) {
-      console.error('[WorldRenderer] Terrain tileset not found! Available:', this.tilemap.tilesets.map(t => t.name));
-      // Try to use the first tileset as fallback
-      const fallback = this.tilemap.tilesets[0];
-      if (fallback) {
-        console.log('[WorldRenderer] Using fallback tileset:', fallback.name);
-      }
-      return;
+      console.error('[WorldRenderer] Terrain tileset not found for chunk:', chunk.id);
     }
 
-    // Create layers with error checking
-    let terrainLayer: Phaser.Tilemaps.TilemapLayer | null = null;
-    let pathLayer: Phaser.Tilemaps.TilemapLayer | null = null;
-    let detailLayer: Phaser.Tilemaps.TilemapLayer | null = null;
+    const terrainLayer = map.createBlankLayer('Terrain', terrainTileset ? [terrainTileset] : [], 0, 0);
+    const pathLayer = pathTileset ? map.createBlankLayer('Paths', [pathTileset], 0, 0) : null;
+    const detailLayer = terrainTileset ? map.createBlankLayer('Details', [terrainTileset], 0, 0) : null;
 
-    try {
-      terrainLayer = this.tilemap.createBlankLayer('Terrain', [terrainTileset], 0, 0);
-      if (!terrainLayer) {
-        console.error('[WorldRenderer] Failed to create Terrain layer');
-      } else {
-        console.log('[WorldRenderer] Terrain layer created successfully');
-      }
-    } catch (e) {
-      console.error('[WorldRenderer] Error creating Terrain layer:', e);
+    if (terrainLayer) {
+      terrainLayer.setDepth(0);
+      this.fillTerrainLayer(terrainLayer, chunk);
+    }
+    if (pathLayer) {
+      pathLayer.setDepth(1);
+      this.fillPathLayer(pathLayer, chunk);
+    }
+    if (detailLayer) {
+      detailLayer.setDepth(2);
     }
 
-    try {
-      if (pathTileset) {
-        pathLayer = this.tilemap.createBlankLayer('Paths', [pathTileset], 0, 0);
-        if (!pathLayer) {
-          console.error('[WorldRenderer] Failed to create Paths layer');
-        } else {
-          console.log('[WorldRenderer] Paths layer created successfully');
-        }
-      }
-    } catch (e) {
-      console.error('[WorldRenderer] Error creating Paths layer:', e);
+    tilemapData.tilemap = map;
+    tilemapData.terrainLayer = terrainLayer!;
+    tilemapData.pathLayer = pathLayer;
+    tilemapData.detailLayer = detailLayer;
+
+    if (terrainLayer) {
+      terrainLayer.setPosition(chunk.bounds.x, chunk.bounds.y);
+    }
+    if (pathLayer) {
+      pathLayer.setPosition(chunk.bounds.x, chunk.bounds.y);
+    }
+    if (detailLayer) {
+      detailLayer.setPosition(chunk.bounds.x, chunk.bounds.y);
     }
 
-    try {
-      if (terrainTileset) {
-        detailLayer = this.tilemap.createBlankLayer('Details', [terrainTileset], 0, 0);
-        if (!detailLayer) {
-          console.error('[WorldRenderer] Failed to create Details layer');
-        } else {
-          console.log('[WorldRenderer] Details layer created successfully');
-        }
-      }
-    } catch (e) {
-      console.error('[WorldRenderer] Error creating Details layer:', e);
-    }
-
-    console.log('[WorldRenderer] Created layers - Terrain:', terrainLayer ? 'OK' : 'FAILED', '| layer:', terrainLayer);
-    console.log('[WorldRenderer] Created layers - Paths:', pathLayer ? 'OK' : 'FAILED', '| layer:', pathLayer);
-    console.log('[WorldRenderer] Created layers - Details:', detailLayer ? 'OK' : 'FAILED', '| layer:', detailLayer);
-
-    this.terrainLayer = terrainLayer;
-    this.pathLayer = pathLayer;
-    this.detailLayer = detailLayer;
-
-    if (this.terrainLayer) {
-      this.terrainLayer.setDepth(0);
-      this.fillTerrainLayer(this.terrainLayer);
-    }
-
-    if (this.pathLayer) {
-      this.pathLayer.setDepth(1);
-      this.fillPathLayer(this.pathLayer);
-    }
-
-    if (this.detailLayer) {
-      this.detailLayer.setDepth(2);
-    }
+    return tilemapData;
   }
 
-  private fillTerrainLayer(layer: Phaser.Tilemaps.TilemapLayer): void {
+  private fillTerrainLayer(layer: Phaser.Tilemaps.TilemapLayer, chunk: WorldChunk): void {
     const widthInTiles = layer.width;
     const heightInTiles = layer.height;
+    const chunkWorldX = chunk.bounds.x;
+    const chunkWorldY = chunk.bounds.y;
 
     for (let y = 0; y < heightInTiles; y++) {
       for (let x = 0; x < widthInTiles; x++) {
-        const worldX = x * TILE_SIZE + TILE_SIZE / 2;
-        const worldY = y * TILE_SIZE + TILE_SIZE / 2;
+        const worldX = chunkWorldX + x * TILE_SIZE + TILE_SIZE / 2;
+        const worldY = chunkWorldY + y * TILE_SIZE + TILE_SIZE / 2;
         const terrainType = getTerrainAtPosition(worldX, worldY);
         const tileIndex = this.terrainTypes.indexOf(terrainType);
 
@@ -314,37 +315,61 @@ private generateTerrainTextures(): void {
     }
   }
 
-  private fillPathLayer(layer: Phaser.Tilemaps.TilemapLayer): void {
+  private fillPathLayer(layer: Phaser.Tilemaps.TilemapLayer, chunk: WorldChunk): void {
     const widthInTiles = layer.width;
     const heightInTiles = layer.height;
+    const chunkWorldX = chunk.bounds.x;
+    const chunkWorldY = chunk.bounds.y;
 
     for (let y = 0; y < heightInTiles; y++) {
       for (let x = 0; x < widthInTiles; x++) {
-        const worldX = x * TILE_SIZE + TILE_SIZE / 2;
-        const worldY = y * TILE_SIZE + TILE_SIZE / 2;
+        const worldX = chunkWorldX + x * TILE_SIZE + TILE_SIZE / 2;
+        const worldY = chunkWorldY + y * TILE_SIZE + TILE_SIZE / 2;
 
         if (isPathAtPosition(worldX, worldY)) {
-          // Path uses the path tileset, which has only 1 tile (index 0)
           layer.putTileAt(0, x, y, true);
         }
       }
     }
   }
 
-  getTerrainLayer(): Phaser.Tilemaps.TilemapLayer | null {
-    return this.terrainLayer;
+  private unloadChunks(minX: number, maxX: number, minY: number, maxY: number): void {
+    const toUnload: string[] = [];
+
+    for (const [chunkId, tilemapData] of this.activeChunkTilemaps) {
+      const chunk = tilemapData.chunk;
+      if (chunk.bounds.x + chunk.bounds.width < minX ||
+          chunk.bounds.x > maxX ||
+          chunk.bounds.y + chunk.bounds.height < minY ||
+          chunk.bounds.y > maxY) {
+        toUnload.push(chunkId);
+      }
+    }
+
+    for (const chunkId of toUnload) {
+      this.unloadChunk(chunkId);
+    }
   }
 
-  getPathLayer(): Phaser.Tilemaps.TilemapLayer | null {
-    return this.pathLayer;
+  private unloadChunk(chunkId: string): void {
+    const tilemapData = this.activeChunkTilemaps.get(chunkId);
+    if (!tilemapData) return;
+
+    tilemapData.terrainLayer?.destroy();
+    tilemapData.pathLayer?.destroy();
+    tilemapData.detailLayer?.destroy();
+    tilemapData.tilemap?.destroy();
+
+    tilemapData.chunk.isLoaded = false;
+    this.chunkPool.push(tilemapData);
+    this.activeChunkTilemaps.delete(chunkId);
   }
 
-  getDetailLayer(): Phaser.Tilemaps.TilemapLayer | null {
-    return this.detailLayer;
-  }
-
-  getTilemap(): Phaser.Tilemaps.Tilemap | null {
-    return this.tilemap;
+  private unloadOldestChunk(): void {
+    const firstKey = this.activeChunkTilemaps.keys().next().value;
+    if (firstKey) {
+      this.unloadChunk(firstKey);
+    }
   }
 
   getTerrainAtPosition(worldX: number, worldY: number): TerrainType {
@@ -366,11 +391,30 @@ private generateTerrainTextures(): void {
     };
   }
 
+  getActiveChunkCount(): number {
+    return this.activeChunkTilemaps.size;
+  }
+
+  getChunkTilemapData(chunkId: string): ChunkTilemapData | undefined {
+    return this.activeChunkTilemaps.get(chunkId);
+  }
+
   destroy(): void {
-    this.terrainLayer?.destroy();
-    this.pathLayer?.destroy();
-    this.detailLayer?.destroy();
-    this.tilemap?.destroy();
+    for (const tilemapData of this.activeChunkTilemaps.values()) {
+      tilemapData.terrainLayer?.destroy();
+      tilemapData.pathLayer?.destroy();
+      tilemapData.detailLayer?.destroy();
+      tilemapData.tilemap?.destroy();
+    }
+    this.activeChunkTilemaps.clear();
+
+    for (const tilemapData of this.chunkPool) {
+      tilemapData.terrainLayer?.destroy();
+      tilemapData.pathLayer?.destroy();
+      tilemapData.detailLayer?.destroy();
+      tilemapData.tilemap?.destroy();
+    }
+    this.chunkPool = [];
 
     this.terrainTilesetTexture?.destroy();
     this.pathTexture?.destroy();

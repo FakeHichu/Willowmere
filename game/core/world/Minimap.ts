@@ -21,10 +21,8 @@ export class Minimap {
   private background!: Phaser.GameObjects.Rectangle;
   private border!: Phaser.GameObjects.Graphics;
   private playerMarker!: Phaser.GameObjects.Graphics;
-  private playerDirectionMarker!: Phaser.GameObjects.Graphics;
   private regionBoundaries!: Phaser.GameObjects.Graphics;
   private landmarkMarkers!: Phaser.GameObjects.Graphics;
-  private npcMarkers!: Phaser.GameObjects.Graphics;
   private buildingMarkers!: Phaser.GameObjects.Graphics;
   private entranceMarkers!: Phaser.GameObjects.Graphics;
   private compass!: Phaser.GameObjects.Container;
@@ -34,6 +32,14 @@ export class Minimap {
   private playerDirection: string = 'down';
   private otherPlayers: Map<string, Vector2> = new Map();
   private lastRenderTime = 0;
+
+  // World coordinate bounds
+  private worldMinX = WORLD_BOUNDS.x;
+  private worldMaxX = WORLD_BOUNDS.x + WORLD_BOUNDS.width;
+  private worldMinY = WORLD_BOUNDS.y;
+  private worldMaxY = WORLD_BOUNDS.y + WORLD_BOUNDS.height;
+  private worldWidth = WORLD_BOUNDS.width;
+  private worldHeight = WORLD_BOUNDS.height;
 
   constructor(scene: Phaser.Scene, config?: Partial<MinimapConfig>) {
     this.scene = scene;
@@ -51,11 +57,9 @@ export class Minimap {
     this.container.setScrollFactor(0);
     this.container.setDepth(1000);
 
-    // Background with subtle gradient effect
     this.background = this.scene.add.rectangle(0, 0, this.config.width, this.config.height, 0x0d0d1a, 0.85);
     this.background.setOrigin(0.5);
 
-    // Decorative border
     this.border = this.scene.add.graphics();
     this.border.lineStyle(2, 0x8d6e63, 0.8);
     this.border.strokeRoundedRect(-this.config.width / 2, -this.config.height / 2, this.config.width, this.config.height, 8);
@@ -64,22 +68,18 @@ export class Minimap {
 
     this.regionBoundaries = this.scene.add.graphics();
     this.landmarkMarkers = this.scene.add.graphics();
-    this.npcMarkers = this.scene.add.graphics();
     this.buildingMarkers = this.scene.add.graphics();
     this.entranceMarkers = this.scene.add.graphics();
     this.playerMarker = this.scene.add.graphics();
-    this.playerDirectionMarker = this.scene.add.graphics();
 
     this.container.add([
       this.background,
       this.border,
       this.regionBoundaries,
       this.landmarkMarkers,
-      this.npcMarkers,
       this.buildingMarkers,
       this.entranceMarkers,
       this.playerMarker,
-      this.playerDirectionMarker,
     ]);
 
     this.createCompass();
@@ -94,7 +94,6 @@ export class Minimap {
     const compassBg = this.scene.add.circle(0, 0, 28, 0x000000, 0.6);
     compassBg.setStrokeStyle(1, 0x8d6e63, 0.5);
     
-    // N/S/E/W labels
     const directions = [
       { label: 'N', angle: -Math.PI / 2 },
       { label: 'E', angle: 0 },
@@ -123,38 +122,39 @@ export class Minimap {
     this.container.add(this.compass);
   }
 
+  private worldToMinimap(worldX: number, worldY: number): { x: number; y: number } {
+    const scaleX = this.config.width / this.worldWidth;
+    const scaleY = this.config.height / this.worldHeight;
+    return {
+      x: (worldX - this.worldMinX) * scaleX - this.config.width / 2,
+      y: (worldY - this.worldMinY) * scaleY - this.config.height / 2,
+    };
+  }
+
   private renderStaticElements(): void {
     this.regionBoundaries.clear();
     this.landmarkMarkers.clear();
     this.buildingMarkers.clear();
     this.entranceMarkers.clear();
 
-    const scaleX = this.config.width / WORLD_BOUNDS.width;
-    const scaleY = this.config.height / WORLD_BOUNDS.height;
-    const centerX = 0;
-    const centerY = 0;
-
     // Draw region boundaries with fill
     for (const region of regions) {
       if (!this.discoveredRegions.has(region.id) && region.id !== 'village') continue;
 
-      const rx = (region.bounds.x - WORLD_BOUNDS.width / 2) * scaleX;
-      const ry = (region.bounds.y - WORLD_BOUNDS.height / 2) * scaleY;
-      const rw = region.bounds.width * scaleX;
-      const rh = region.bounds.height * scaleY;
+      const pos1 = this.worldToMinimap(region.bounds.x, region.bounds.y);
+      const pos2 = this.worldToMinimap(region.bounds.x + region.bounds.width, region.bounds.y + region.bounds.height);
+      const rw = pos2.x - pos1.x;
+      const rh = pos2.y - pos1.y;
 
-      // Region fill
       const regionColor = Phaser.Display.Color.HexStringToColor(region.ambientColor).color;
       this.regionBoundaries.fillStyle(regionColor, 0.15);
-      this.regionBoundaries.fillRoundedRect(rx, ry, rw, rh, 2);
+      this.regionBoundaries.fillRoundedRect(pos1.x, pos1.y, rw, rh, 2);
       
-      // Region border
       this.regionBoundaries.lineStyle(1, 0x8d6e63, 0.6);
-      this.regionBoundaries.strokeRoundedRect(rx, ry, rw, rh, 2);
+      this.regionBoundaries.strokeRoundedRect(pos1.x, pos1.y, rw, rh, 2);
 
-      // Region label
-      const labelX = rx + rw / 2;
-      const labelY = ry + 10;
+      const labelX = pos1.x + rw / 2;
+      const labelY = pos1.y + 10;
       const regionLabel = this.scene.add.text(labelX, labelY, region.displayName, {
         fontSize: '7px',
         color: '#ffd700',
@@ -172,14 +172,10 @@ export class Minimap {
 
       const regionLandmarks = getLandmarksByRegion(region.id).filter(l => l.discovered || this.discoveredLandmarks.has(l.id));
       for (const landmark of regionLandmarks) {
-        const lx = (landmark.position.x - WORLD_BOUNDS.width / 2) * scaleX;
-        const ly = (landmark.position.y - WORLD_BOUNDS.height / 2) * scaleY;
-
+        const pos = this.worldToMinimap(landmark.position.x, landmark.position.y);
         const color = this.getLandmarkColor(landmark.type);
         const size = this.getLandmarkSize(landmark.type);
-        
-        // Draw landmark icon based on type
-        this.drawLandmarkIcon(this.landmarkMarkers, lx, ly, landmark.type, color, size);
+        this.drawLandmarkIcon(this.landmarkMarkers, pos.x, pos.y, landmark.type, color, size);
       }
     }
 
@@ -187,38 +183,31 @@ export class Minimap {
     for (const obj of worldObjects) {
       if (obj.type !== 'building') continue;
 
-      const bx = (obj.position.x - WORLD_BOUNDS.width / 2) * scaleX;
-      const by = (obj.position.y - WORLD_BOUNDS.height / 2) * scaleY;
-
-      // Building icon - small house shape
+      const pos = this.worldToMinimap(obj.position.x, obj.position.y);
       this.buildingMarkers.fillStyle(0x8d6e63, 1);
-      this.buildingMarkers.fillRect(bx - 3, by - 3, 6, 6);
+      this.buildingMarkers.fillRect(pos.x - 3, pos.y - 3, 6, 6);
       this.buildingMarkers.fillStyle(0x5d4037, 1);
-      this.buildingMarkers.fillTriangle(bx, by - 5, bx - 4, by - 2, bx + 4, by - 2);
+      this.buildingMarkers.fillTriangle(pos.x, pos.y - 5, pos.x - 4, pos.y - 2, pos.x + 4, pos.y - 2);
       this.buildingMarkers.lineStyle(1, 0x5d4037, 1);
-      this.buildingMarkers.strokeRect(bx - 3, by - 3, 6, 6);
+      this.buildingMarkers.strokeRect(pos.x - 3, pos.y - 3, 6, 6);
     }
 
     // Draw region entrances
     for (const entrance of regionEntrances) {
       if (!entrance.discovered) continue;
 
-      const ex = (entrance.position.x - WORLD_BOUNDS.width / 2) * scaleX;
-      const ey = (entrance.position.y - WORLD_BOUNDS.height / 2) * scaleY;
-
-      // Entrance icon - path marker
+      const pos = this.worldToMinimap(entrance.position.x, entrance.position.y);
       this.entranceMarkers.fillStyle(0x4fc3f7, 1);
-      this.entranceMarkers.fillCircle(ex, ey, 3);
+      this.entranceMarkers.fillCircle(pos.x, pos.y, 3);
       this.entranceMarkers.lineStyle(1, 0xffffff, 0.8);
-      this.entranceMarkers.strokeCircle(ex, ey, 3);
+      this.entranceMarkers.strokeCircle(pos.x, pos.y, 3);
       
-      // Entrance type indicator
       if (entrance.type === 'cave') {
         this.entranceMarkers.fillStyle(0xff9800, 1);
-        this.entranceMarkers.fillTriangle(ex, ey - 4, ex - 3, ey + 1, ex + 3, ey + 1);
+        this.entranceMarkers.fillTriangle(pos.x, pos.y - 4, pos.x - 3, pos.y + 1, pos.x + 3, pos.y + 1);
       } else if (entrance.type === 'bridge') {
         this.entranceMarkers.fillStyle(0x8d6e63, 1);
-        this.entranceMarkers.fillRect(ex - 4, ey - 1, 8, 2);
+        this.entranceMarkers.fillRect(pos.x - 4, pos.y - 1, 8, 2);
       }
     }
   }
@@ -230,42 +219,33 @@ export class Minimap {
     switch (type) {
       case 'tree':
       case 'natural':
-        // Tree shape
         graphics.fillTriangle(x, y - size, x - size * 0.7, y + size * 0.3, x + size * 0.7, y + size * 0.3);
         graphics.strokeTriangle(x, y - size, x - size * 0.7, y + size * 0.3, x + size * 0.7, y + size * 0.3);
         break;
       case 'water':
-        // Water drop
         graphics.fillCircle(x, y, size);
         graphics.strokeCircle(x, y, size);
         break;
       case 'shrine':
-        // Shrine - diamond shape
         graphics.fillRect(x - size * 0.7, y - size * 0.7, size * 1.4, size * 1.4);
         graphics.strokeRect(x - size * 0.7, y - size * 0.7, size * 1.4, size * 1.4);
-        // Rotate for diamond effect via fillTriangle
         break;
       case 'ruin':
       case 'structure':
-        // Square/rectangle for structures
         graphics.fillRect(x - size, y - size, size * 2, size * 2);
         graphics.strokeRect(x - size, y - size, size * 2, size * 2);
         break;
       case 'rock':
-        // Irregular circle
         graphics.fillCircle(x, y, size);
         graphics.strokeCircle(x, y, size);
         break;
       case 'viewpoint':
-        // Triangle pointing up
         graphics.fillTriangle(x, y - size, x - size, y + size, x + size, y + size);
         graphics.strokeTriangle(x, y - size, x - size, y + size, x + size, y + size);
         break;
       case 'hidden':
-        // Star shape
         graphics.fillCircle(x, y, size);
         graphics.strokeCircle(x, y, size);
-        // Small cross for hidden
         graphics.lineStyle(1, 0xffffff, 1);
         graphics.lineBetween(x - size, y, x + size, y);
         graphics.lineBetween(x, y - size, x, y + size);
@@ -314,19 +294,15 @@ export class Minimap {
 
   private updatePlayerMarker(): void {
     const now = this.scene.time.now;
-    if (now - this.lastRenderTime < 16) return; // ~60fps cap
+    if (now - this.lastRenderTime < 16) return;
     this.lastRenderTime = now;
 
     this.playerMarker.clear();
-    this.playerDirectionMarker.clear();
 
-    const scaleX = this.config.width / WORLD_BOUNDS.width;
-    const scaleY = this.config.height / WORLD_BOUNDS.height;
+    const pos = this.worldToMinimap(this.playerPosition.x, this.playerPosition.y);
+    const px = pos.x;
+    const py = pos.y;
 
-    const px = (this.playerPosition.x - WORLD_BOUNDS.width / 2) * scaleX;
-    const py = (this.playerPosition.y - WORLD_BOUNDS.height / 2) * scaleY;
-
-    // Player marker - arrow showing direction
     this.playerMarker.fillStyle(0xffd700, 1);
     this.playerMarker.lineStyle(2, 0x000000, 1);
 
@@ -338,7 +314,6 @@ export class Minimap {
     };
     const angle = dirAngles[this.playerDirection] || 0;
 
-    // Draw arrow
     const arrowSize = 6;
     const tipX = px + Math.cos(angle) * arrowSize;
     const tipY = py + Math.sin(angle) * arrowSize;
@@ -352,18 +327,15 @@ export class Minimap {
     this.playerMarker.fillTriangle(tipX, tipY, baseX1, baseY1, baseX2, baseY2);
     this.playerMarker.strokeTriangle(tipX, tipY, baseX1, baseY1, baseX2, baseY2);
 
-    // Center dot
     this.playerMarker.fillStyle(0x000000, 1);
     this.playerMarker.fillCircle(px, py, 2);
 
-    // Other players
     this.playerMarker.fillStyle(0x4fc3f7, 1);
     this.playerMarker.lineStyle(1, 0x000000, 0.8);
-    for (const [, pos] of this.otherPlayers) {
-      const ox = (pos.x - WORLD_BOUNDS.width / 2) * scaleX;
-      const oy = (pos.y - WORLD_BOUNDS.height / 2) * scaleY;
-      this.playerMarker.fillCircle(ox, oy, 3);
-      this.playerMarker.strokeCircle(ox, oy, 3);
+    for (const [, otherPos] of this.otherPlayers) {
+      const otherMinimapPos = this.worldToMinimap(otherPos.x, otherPos.y);
+      this.playerMarker.fillCircle(otherMinimapPos.x, otherMinimapPos.y, 3);
+      this.playerMarker.strokeCircle(otherMinimapPos.x, otherMinimapPos.y, 3);
     }
   }
 
@@ -399,6 +371,11 @@ export class Minimap {
 
   setDiscoveredRegions(regionIds: string[]): void {
     this.discoveredRegions = new Set(regionIds);
+    this.renderStaticElements();
+  }
+
+  setDiscoveredLandmarks(landmarkIds: string[]): void {
+    this.discoveredLandmarks = new Set(landmarkIds);
     this.renderStaticElements();
   }
 

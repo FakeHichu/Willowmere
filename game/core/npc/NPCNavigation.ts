@@ -5,17 +5,19 @@ export class NPCNavigation {
   private pathfinding: Pathfinding;
   private currentWaypoints: Vector2[] = [];
   private currentWaypointIndex: number = 0;
+  private moveSpeed = 60;
 
   constructor() {
     this.pathfinding = new Pathfinding();
   }
 
-  setDestination(startPos: Vector2, targetPos: Vector2): void {
+  setDestination(startPos: Vector2, targetPos: Vector2, speed: number = 60): void {
+    this.moveSpeed = speed;
     this.currentWaypoints = this.pathfinding.findPath(startPos, targetPos);
     this.currentWaypointIndex = 0;
   }
 
-  getNextMovement(currentPos: Vector2, speed: number, deltaSec: number): { position: Vector2; direction: Direction; reached: boolean } {
+  getNextMovement(currentPos: Vector2, deltaSec: number): { position: Vector2; direction: Direction; reached: boolean } {
     if (this.currentWaypoints.length === 0 || this.currentWaypointIndex >= this.currentWaypoints.length) {
       return { position: currentPos, direction: 'down', reached: true };
     }
@@ -25,14 +27,16 @@ export class NPCNavigation {
     const dy = target.y - currentPos.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
 
-    if (dist < 8) {
+    const waypointThreshold = 12;
+    if (dist < waypointThreshold) {
       this.currentWaypointIndex++;
       if (this.currentWaypointIndex >= this.currentWaypoints.length) {
         return { position: target, direction: 'down', reached: true };
       }
+      return this.getNextMovement(currentPos, deltaSec);
     }
 
-    const step = speed * deltaSec;
+    const step = this.moveSpeed * deltaSec;
     const dirX = dx / (dist || 1);
     const dirY = dy / (dist || 1);
 
@@ -51,5 +55,18 @@ export class NPCNavigation {
       direction,
       reached: false,
     };
+  }
+
+  hasActivePath(): boolean {
+    return this.currentWaypoints.length > 0 && this.currentWaypointIndex < this.currentWaypoints.length;
+  }
+
+  getRemainingWaypoints(): Vector2[] {
+    return this.currentWaypoints.slice(this.currentWaypointIndex);
+  }
+
+  clearPath(): void {
+    this.currentWaypoints = [];
+    this.currentWaypointIndex = 0;
   }
 }

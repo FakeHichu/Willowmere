@@ -71,6 +71,8 @@ export function getChunkForPosition(x: number, y: number, chunks: WorldChunk[]):
   );
 }
 
+export { WorldChunk };
+
 export function getActiveChunks(playerX: number, playerY: number, renderDistance: number, chunks: WorldChunk[]): WorldChunk[] {
   return chunks.filter(chunk => {
     const dx = chunk.bounds.x + chunk.bounds.width / 2 - playerX;
