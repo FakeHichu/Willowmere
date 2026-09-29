@@ -71,7 +71,7 @@ export class DynamicCamera {
       shakeIntensity: 0,
       shakeDuration: 0,
       lookAhead: { x: 100, y: 80 },
-      bounds: new Phaser.Geom.Rectangle(-400, -3500, 6800, 8000),
+      bounds: new Phaser.Geom.Rectangle(-400, -3500, 6800, 8500),
       ...config
     };
   }

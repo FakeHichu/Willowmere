@@ -1,10 +1,9 @@
 import Phaser from 'phaser';
 import type { CharacterCustomization, Direction, PlayerState } from '@shared/types';
 import { CharacterShadow } from './CharacterShadow';
-import { CharacterEquipment, EquipmentLayer } from './CharacterEquipment';
+import { CharacterEquipment } from './CharacterEquipment';
 import { CharacterAnimator } from './CharacterAnimator';
 import { AnimationStateMachine } from './AnimationStateMachine';
-import { DepthManager, DepthLayer } from '../world/DepthManager';
 
 export class CharacterRenderer {
   private scene: Phaser.Scene;
@@ -61,7 +60,8 @@ export class CharacterRenderer {
 
   private setLayerDepths(y: number): void {
     // Base depth from Y position for Y-sorting
-    const baseDepth = DepthManager.getEntityDepth(y, 1, DepthLayer.DYNAMIC_ENTITIES_BASE);
+    // Use very high base to ensure character is above terrain (0-2), environment (up to ~1000), lighting (2000)
+    const baseDepth = 5000 + Math.floor(y / 10);
     
     // Set main container depth (most important - must be above terrain at depth 0-2)
     this.container.setDepth(baseDepth);
@@ -75,7 +75,7 @@ export class CharacterRenderer {
   }
 
   private updateLayerDepths(y: number): void {
-    const baseDepth = DepthManager.getEntityDepth(y, 1, DepthLayer.DYNAMIC_ENTITIES_BASE);
+    const baseDepth = 5000 + Math.floor(y / 10);
     
     // Update main container depth
     this.container.setDepth(baseDepth);
