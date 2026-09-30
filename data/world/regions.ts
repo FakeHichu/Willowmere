@@ -26,9 +26,40 @@ export interface WorldRegion {
   terrainPalette: TerrainType[];
   discoveryRadius: number;
   fogOfWar: boolean;
+  transitionZones?: RegionTransitionZone[];
+  boundaryType?: RegionBoundaryType;
 }
 
 export type WeatherAffinity = 'temperate' | 'forest' | 'highland' | 'riverside' | 'ruins' | 'cavern' | 'mountain' | 'coastal';
+
+export type RegionBoundaryType = 
+  | 'cliff'
+  | 'dense_forest'
+  | 'river'
+  | 'mountain_pass'
+  | 'cave_entrance'
+  | 'open_plains'
+  | 'coastal_shore'
+  | 'ruined_wall'
+  | 'stone_archway'
+  | 'wooden_gate';
+
+export interface RegionTransitionZone {
+  id: string;
+  connectedRegionId: string;
+  entranceId: string;
+  bounds: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
+  boundaryType: RegionBoundaryType;
+  transitionWidth: number;
+  terrainBlend: TerrainType[];
+  landmarkIds?: string[];
+  objectIds?: string[];
+}
 
 export interface RegionConnection {
   from: string;
@@ -92,6 +123,47 @@ export const regions: WorldRegion[] = [
     terrainPalette: ['grass', 'dirt', 'path', 'stone', 'shallow_water'],
     discoveryRadius: 0,
     fogOfWar: false,
+    boundaryType: 'open_plains',
+    transitionZones: [
+      {
+        id: 'village_to_woods_transition',
+        connectedRegionId: 'whispering_woods',
+        entranceId: 'entrance_north_road',
+        bounds: { x: 2000, y: 1500, width: 2000, height: 100 },
+        boundaryType: 'dense_forest',
+        transitionWidth: 100,
+        terrainBlend: ['grass', 'forest_floor', 'dirt', 'path'],
+        landmarkIds: ['hidden_forest_path'],
+      },
+      {
+        id: 'village_to_riverside_transition',
+        connectedRegionId: 'riverside',
+        entranceId: 'entrance_east_road',
+        bounds: { x: 3900, y: 1500, width: 200, height: 1600 },
+        boundaryType: 'river',
+        transitionWidth: 200,
+        terrainBlend: ['grass', 'dirt', 'sand', 'shallow_water', 'path', 'bridge'],
+        landmarkIds: ['wooden_bridge'],
+      },
+      {
+        id: 'village_to_camp_transition',
+        connectedRegionId: 'abandoned_camp',
+        entranceId: 'entrance_west_road',
+        bounds: { x: 2000, y: 1500, width: 200, height: 1600 },
+        boundaryType: 'dense_forest',
+        transitionWidth: 100,
+        terrainBlend: ['grass', 'dirt', 'forest_floor', 'path'],
+      },
+      {
+        id: 'village_to_grove_transition',
+        connectedRegionId: 'hidden_grove',
+        entranceId: 'entrance_south_road',
+        bounds: { x: 2000, y: 3000, width: 2000, height: 100 },
+        boundaryType: 'dense_forest',
+        transitionWidth: 100,
+        terrainBlend: ['grass', 'forest_floor', 'dirt', 'path'],
+      },
+    ],
   },
   {
     id: 'riverside',
@@ -124,6 +196,38 @@ export const regions: WorldRegion[] = [
     terrainPalette: ['grass', 'dirt', 'sand', 'shallow_water', 'deep_water', 'river', 'path', 'bridge'],
     discoveryRadius: 250,
     fogOfWar: true,
+    boundaryType: 'river',
+    transitionZones: [
+      {
+        id: 'riverside_to_village_transition',
+        connectedRegionId: 'village',
+        entranceId: 'entrance_east_road',
+        bounds: { x: 4000, y: 1500, width: 200, height: 1600 },
+        boundaryType: 'river',
+        transitionWidth: 200,
+        terrainBlend: ['grass', 'dirt', 'sand', 'shallow_water', 'path', 'bridge'],
+        landmarkIds: ['wooden_bridge'],
+      },
+      {
+        id: 'riverside_to_woods_transition',
+        connectedRegionId: 'whispering_woods',
+        entranceId: 'entrance_riverside_north',
+        bounds: { x: 4000, y: 1500, width: 2000, height: 100 },
+        boundaryType: 'dense_forest',
+        transitionWidth: 100,
+        terrainBlend: ['sand', 'grass', 'forest_floor', 'path'],
+      },
+      {
+        id: 'riverside_to_lakeside_transition',
+        connectedRegionId: 'lakeside',
+        entranceId: 'entrance_lakeside_south',
+        bounds: { x: 4000, y: 3000, width: 2000, height: 100 },
+        boundaryType: 'river',
+        transitionWidth: 200,
+        terrainBlend: ['sand', 'shallow_water', 'deep_water', 'river', 'grass', 'mud', 'bridge'],
+        landmarkIds: ['mirror_lake'],
+      },
+    ],
   },
   {
     id: 'whispering_woods',
@@ -157,6 +261,45 @@ export const regions: WorldRegion[] = [
     terrainPalette: ['forest_floor', 'dirt', 'grass', 'stone', 'shallow_water', 'path', 'mud'],
     discoveryRadius: 300,
     fogOfWar: true,
+    boundaryType: 'dense_forest',
+    transitionZones: [
+      {
+        id: 'woods_to_village_transition',
+        connectedRegionId: 'village',
+        entranceId: 'entrance_north_road',
+        bounds: { x: 2000, y: 1400, width: 2000, height: 100 },
+        boundaryType: 'dense_forest',
+        transitionWidth: 100,
+        terrainBlend: ['forest_floor', 'grass', 'dirt', 'path'],
+      },
+      {
+        id: 'woods_to_mountains_transition',
+        connectedRegionId: 'northern_mountains',
+        entranceId: 'entrance_forest_mountains',
+        bounds: { x: 2000, y: 0, width: 2000, height: 100 },
+        boundaryType: 'mountain_pass',
+        transitionWidth: 100,
+        terrainBlend: ['forest_floor', 'stone', 'mountain', 'path', 'cliff'],
+      },
+      {
+        id: 'woods_to_ruins_transition',
+        connectedRegionId: 'ancient_ruins',
+        entranceId: 'entrance_forest_ruins',
+        bounds: { x: 3900, y: 0, width: 100, height: 1500 },
+        boundaryType: 'ruined_wall',
+        transitionWidth: 100,
+        terrainBlend: ['forest_floor', 'ruins', 'stone', 'grass'],
+      },
+      {
+        id: 'woods_to_cave_transition',
+        connectedRegionId: 'cave_underground',
+        entranceId: 'entrance_hidden_cave',
+        bounds: { x: 3800, y: 200, width: 200, height: 200 },
+        boundaryType: 'cave_entrance',
+        transitionWidth: 50,
+        terrainBlend: ['forest_floor', 'stone', 'cave_floor'],
+      },
+    ],
   },
   {
     id: 'southern_farmland',
@@ -189,6 +332,27 @@ export const regions: WorldRegion[] = [
     terrainPalette: ['farmland', 'dirt', 'grass', 'path', 'mud', 'shallow_water'],
     discoveryRadius: 200,
     fogOfWar: true,
+    boundaryType: 'open_plains',
+    transitionZones: [
+      {
+        id: 'farmland_to_village_transition',
+        connectedRegionId: 'village',
+        entranceId: 'entrance_farmland_village',
+        bounds: { x: 1900, y: 2800, width: 200, height: 1700 },
+        boundaryType: 'open_plains',
+        transitionWidth: 200,
+        terrainBlend: ['farmland', 'grass', 'dirt', 'path'],
+      },
+      {
+        id: 'farmland_to_grove_transition',
+        connectedRegionId: 'hidden_grove',
+        entranceId: 'entrance_farmland_grove',
+        bounds: { x: 1900, y: 3400, width: 200, height: 1100 },
+        boundaryType: 'dense_forest',
+        transitionWidth: 100,
+        terrainBlend: ['farmland', 'grass', 'forest_floor', 'dirt', 'path'],
+      },
+    ],
   },
   {
     id: 'ancient_ruins',
@@ -220,6 +384,27 @@ export const regions: WorldRegion[] = [
     terrainPalette: ['ruins', 'stone', 'grass', 'forest_floor', 'cliff'],
     discoveryRadius: 300,
     fogOfWar: true,
+    boundaryType: 'ruined_wall',
+    transitionZones: [
+      {
+        id: 'ruins_to_woods_transition',
+        connectedRegionId: 'whispering_woods',
+        entranceId: 'entrance_forest_ruins',
+        bounds: { x: 4000, y: 0, width: 100, height: 1500 },
+        boundaryType: 'ruined_wall',
+        transitionWidth: 100,
+        terrainBlend: ['ruins', 'forest_floor', 'stone', 'grass'],
+      },
+      {
+        id: 'ruins_to_cave_transition',
+        connectedRegionId: 'cave_underground',
+        entranceId: 'entrance_ruins_cave',
+        bounds: { x: 4000, y: 1300, width: 2000, height: 200 },
+        boundaryType: 'cave_entrance',
+        transitionWidth: 100,
+        terrainBlend: ['ruins', 'stone', 'cave_floor'],
+      },
+    ],
   },
   {
     id: 'northern_mountains',
@@ -249,6 +434,28 @@ export const regions: WorldRegion[] = [
     terrainPalette: ['mountain', 'snow', 'stone', 'cliff', 'path'],
     discoveryRadius: 400,
     fogOfWar: true,
+    boundaryType: 'mountain_pass',
+    transitionZones: [
+      {
+        id: 'mountains_to_woods_transition',
+        connectedRegionId: 'whispering_woods',
+        entranceId: 'entrance_forest_mountains',
+        bounds: { x: 2000, y: 0, width: 2000, height: 100 },
+        boundaryType: 'mountain_pass',
+        transitionWidth: 100,
+        terrainBlend: ['mountain', 'stone', 'forest_floor', 'path', 'cliff'],
+      },
+      {
+        id: 'mountains_to_highland_transition',
+        connectedRegionId: 'highland_trail',
+        entranceId: 'entrance_highland_mountains',
+        bounds: { x: 2000, y: -1500, width: 2000, height: 100 },
+        boundaryType: 'mountain_pass',
+        transitionWidth: 100,
+        terrainBlend: ['mountain', 'stone', 'grass', 'path', 'bridge', 'cliff'],
+        landmarkIds: ['mountain_pass_bridge'],
+      },
+    ],
   },
   {
     id: 'highland_trail',
@@ -279,6 +486,36 @@ export const regions: WorldRegion[] = [
     terrainPalette: ['mountain', 'stone', 'grass', 'path', 'bridge', 'cliff'],
     discoveryRadius: 350,
     fogOfWar: true,
+    boundaryType: 'cliff',
+    transitionZones: [
+      {
+        id: 'highland_to_mountains_transition',
+        connectedRegionId: 'northern_mountains',
+        entranceId: 'entrance_highland_mountains',
+        bounds: { x: 0, y: -1400, width: 2000, height: 100 },
+        boundaryType: 'mountain_pass',
+        transitionWidth: 100,
+        terrainBlend: ['mountain', 'stone', 'grass', 'path', 'bridge', 'cliff'],
+      },
+      {
+        id: 'highland_to_shrine_transition',
+        connectedRegionId: 'old_shrine',
+        entranceId: 'entrance_highland_shrine',
+        bounds: { x: 0, y: -3000, width: 2000, height: 100 },
+        boundaryType: 'stone_archway',
+        transitionWidth: 100,
+        terrainBlend: ['mountain', 'stone', 'path', 'snow', 'ruins'],
+      },
+      {
+        id: 'highland_to_camp_transition',
+        connectedRegionId: 'abandoned_camp',
+        entranceId: 'entrance_camp_highland',
+        bounds: { x: 0, y: 1300, width: 2000, height: 100 },
+        boundaryType: 'cliff',
+        transitionWidth: 100,
+        terrainBlend: ['stone', 'grass', 'dirt', 'forest_floor', 'path'],
+      },
+    ],
   },
   {
     id: 'old_shrine',
@@ -307,6 +544,18 @@ export const regions: WorldRegion[] = [
     terrainPalette: ['stone', 'grass', 'path', 'snow', 'ruins'],
     discoveryRadius: 200,
     fogOfWar: true,
+    boundaryType: 'stone_archway',
+    transitionZones: [
+      {
+        id: 'shrine_to_highland_transition',
+        connectedRegionId: 'highland_trail',
+        entranceId: 'entrance_highland_shrine',
+        bounds: { x: 0, y: -1500, width: 2000, height: 100 },
+        boundaryType: 'stone_archway',
+        transitionWidth: 100,
+        terrainBlend: ['stone', 'grass', 'path', 'snow', 'ruins'],
+      },
+    ],
   },
   {
     id: 'hidden_grove',
@@ -337,6 +586,36 @@ export const regions: WorldRegion[] = [
     terrainPalette: ['grass', 'forest_floor', 'dirt', 'shallow_water', 'path'],
     discoveryRadius: 200,
     fogOfWar: true,
+    boundaryType: 'dense_forest',
+    transitionZones: [
+      {
+        id: 'grove_to_village_transition',
+        connectedRegionId: 'village',
+        entranceId: 'entrance_south_road',
+        bounds: { x: 2000, y: 3100, width: 2000, height: 100 },
+        boundaryType: 'dense_forest',
+        transitionWidth: 100,
+        terrainBlend: ['grass', 'forest_floor', 'dirt', 'path'],
+      },
+      {
+        id: 'grove_to_farmland_transition',
+        connectedRegionId: 'southern_farmland',
+        entranceId: 'entrance_farmland_grove',
+        bounds: { x: 2000, y: 4400, width: 2000, height: 100 },
+        boundaryType: 'dense_forest',
+        transitionWidth: 100,
+        terrainBlend: ['grass', 'forest_floor', 'farmland', 'dirt', 'path'],
+      },
+      {
+        id: 'grove_to_lakeside_transition',
+        connectedRegionId: 'lakeside',
+        entranceId: 'entrance_grove_lakeside',
+        bounds: { x: 3900, y: 3100, width: 100, height: 1400 },
+        boundaryType: 'coastal_shore',
+        transitionWidth: 100,
+        terrainBlend: ['grass', 'forest_floor', 'sand', 'shallow_water', 'mud'],
+      },
+    ],
   },
   {
     id: 'lakeside',
@@ -366,6 +645,27 @@ export const regions: WorldRegion[] = [
     terrainPalette: ['sand', 'shallow_water', 'deep_water', 'grass', 'mud', 'bridge'],
     discoveryRadius: 300,
     fogOfWar: true,
+    boundaryType: 'coastal_shore',
+    transitionZones: [
+      {
+        id: 'lakeside_to_riverside_transition',
+        connectedRegionId: 'riverside',
+        entranceId: 'entrance_lakeside_south',
+        bounds: { x: 4000, y: 3100, width: 2000, height: 100 },
+        boundaryType: 'river',
+        transitionWidth: 200,
+        terrainBlend: ['sand', 'shallow_water', 'deep_water', 'river', 'grass', 'mud', 'bridge'],
+      },
+      {
+        id: 'lakeside_to_grove_transition',
+        connectedRegionId: 'hidden_grove',
+        entranceId: 'entrance_grove_lakeside',
+        bounds: { x: 4000, y: 3100, width: 100, height: 1400 },
+        boundaryType: 'coastal_shore',
+        transitionWidth: 100,
+        terrainBlend: ['sand', 'grass', 'forest_floor', 'shallow_water', 'mud'],
+      },
+    ],
   },
   {
     id: 'abandoned_camp',
@@ -395,6 +695,27 @@ export const regions: WorldRegion[] = [
     terrainPalette: ['dirt', 'grass', 'stone', 'forest_floor', 'mud'],
     discoveryRadius: 250,
     fogOfWar: true,
+    boundaryType: 'dense_forest',
+    transitionZones: [
+      {
+        id: 'camp_to_village_transition',
+        connectedRegionId: 'village',
+        entranceId: 'entrance_west_road',
+        bounds: { x: 2000, y: 1300, width: 200, height: 1500 },
+        boundaryType: 'dense_forest',
+        transitionWidth: 100,
+        terrainBlend: ['dirt', 'grass', 'forest_floor', 'path'],
+      },
+      {
+        id: 'camp_to_highland_transition',
+        connectedRegionId: 'highland_trail',
+        entranceId: 'entrance_camp_highland',
+        bounds: { x: 0, y: 1300, width: 2000, height: 100 },
+        boundaryType: 'cliff',
+        transitionWidth: 100,
+        terrainBlend: ['dirt', 'grass', 'stone', 'forest_floor', 'path', 'cliff'],
+      },
+    ],
   },
   {
     id: 'cave_underground',
@@ -424,6 +745,27 @@ export const regions: WorldRegion[] = [
     terrainPalette: ['cave_floor', 'stone', 'shallow_water', 'cliff'],
     discoveryRadius: 150,
     fogOfWar: true,
+    boundaryType: 'cave_entrance',
+    transitionZones: [
+      {
+        id: 'cave_to_woods_transition',
+        connectedRegionId: 'whispering_woods',
+        entranceId: 'entrance_hidden_cave',
+        bounds: { x: 3800, y: -1500, width: 200, height: 200 },
+        boundaryType: 'cave_entrance',
+        transitionWidth: 50,
+        terrainBlend: ['cave_floor', 'stone', 'forest_floor'],
+      },
+      {
+        id: 'cave_to_ruins_transition',
+        connectedRegionId: 'ancient_ruins',
+        entranceId: 'entrance_ruins_cave',
+        bounds: { x: 4000, y: -1500, width: 2000, height: 200 },
+        boundaryType: 'cave_entrance',
+        transitionWidth: 100,
+        terrainBlend: ['cave_floor', 'stone', 'ruins'],
+      },
+    ],
   },
 ];
 

@@ -11,13 +11,13 @@ import {
   WorldMapUI,
   AudioManager,
   DynamicCamera,
-  WorldChunkManager,
   WorldStreamer,
   LandmarkManager,
   WorldObjectManager,
   EnvironmentManager,
   WorldEventManager,
   ExplorationSystem,
+  WaterManager,
 } from '../world';
 import { CharacterRenderer } from '../characters/CharacterRenderer';
 import { NPCManager } from '../npc/NPCManager';
@@ -60,13 +60,13 @@ export class VillageScene extends Phaser.Scene {
   private worldMapUI!: WorldMapUI;
   private dynamicCamera!: DynamicCamera;
   private audioManager!: AudioManager;
-  private chunkManager!: WorldChunkManager;
   private worldStreamer!: WorldStreamer;
   private landmarkManager!: LandmarkManager;
   private objectManager!: WorldObjectManager;
   private environmentManager!: EnvironmentManager;
   private eventManager!: WorldEventManager;
   private npcManager!: NPCManager;
+  private waterManager!: WaterManager;
   private characterRenderer!: CharacterRenderer;
   private progressionSystem!: ProgressionSystem;
   private explorationSystem!: ExplorationSystem;
@@ -132,10 +132,6 @@ export class VillageScene extends Phaser.Scene {
     this.audioManager = new AudioManager(this);
     this.audioManager.create();
 
-    // Initialize Open World Managers
-    this.chunkManager = new WorldChunkManager();
-    this.chunkManager.create();
-
     this.worldStreamer = new WorldStreamer(this);
     this.worldStreamer.setWorldRenderer(this.worldRenderer);
     this.worldStreamer.create();
@@ -150,6 +146,9 @@ export class VillageScene extends Phaser.Scene {
 
     this.eventManager = new WorldEventManager(this, this.emitter!);
     this.eventManager.create();
+
+    this.waterManager = new WaterManager(this);
+    this.waterManager.scanWaterBodies({ x: WORLD_BOUNDS.x, y: WORLD_BOUNDS.y, width: WORLD_BOUNDS.width, height: WORLD_BOUNDS.height });
 
     this.npcManager = new NPCManager(this);
     this.npcManager.create();
@@ -442,6 +441,8 @@ export class VillageScene extends Phaser.Scene {
     this.eventManager.update(playerPos);
 
     this.npcManager.update(time, delta, timeStr, this.environmentManager.getCurrentWeather(), playerPos);
+
+    this.waterManager.update(delta, this.cameras.main);
 
     // Emit region changes for event manager hooks
     const currentRegion = this.regionManager.getCurrentRegion();

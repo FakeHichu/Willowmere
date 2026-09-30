@@ -1,18 +1,16 @@
 import type Phaser from 'phaser';
 import type { Vector2, WorldChunk } from '@shared/types';
-import { WorldChunkManager } from './WorldChunkManager';
-import { WorldRenderer, ChunkTilemapData } from './WorldRenderer';
+import { WorldRenderer, ChunkLayerData } from './WorldRenderer';
 
 export interface StreamingUpdateResult {
   loadedChunks: WorldChunk[];
   unloadedChunks: WorldChunk[];
-  tilemapsLoaded: ChunkTilemapData[];
+  tilemapsLoaded: ChunkLayerData[];
   tilemapsUnloaded: string[];
 }
 
 export class WorldStreamer {
   private scene: Phaser.Scene;
-  private chunkManager: WorldChunkManager;
   private worldRenderer: WorldRenderer | null = null;
   private lastPlayerPos: Vector2 = { x: -9999, y: -9999 };
   private updateThrottle = 500;
@@ -20,7 +18,6 @@ export class WorldStreamer {
 
   constructor(scene: Phaser.Scene) {
     this.scene = scene;
-    this.chunkManager = new WorldChunkManager();
   }
 
   setWorldRenderer(renderer: WorldRenderer): void {
@@ -28,7 +25,6 @@ export class WorldStreamer {
   }
 
   create(): void {
-    this.chunkManager.create();
   }
 
   update(playerPos: Vector2): StreamingUpdateResult {
@@ -46,30 +42,23 @@ export class WorldStreamer {
     this.lastUpdateTime = now;
     this.lastPlayerPos = { ...playerPos };
 
-    const { newlyLoaded, newlyUnloaded } = this.chunkManager.updatePlayerPosition(playerPos);
-
-    let tilemapsLoaded: ChunkTilemapData[] = [];
+    let tilemapsLoaded: ChunkLayerData[] = [];
     let tilemapsUnloaded: string[] = [];
 
     if (this.worldRenderer) {
       this.worldRenderer.updateCameraView(this.scene.cameras.main);
-      tilemapsLoaded = newlyLoaded.map(c => this.worldRenderer!.getChunkTilemapData(c.id)).filter(Boolean) as ChunkTilemapData[];
-      tilemapsUnloaded = newlyUnloaded;
+      // WorldRenderer manages its own chunks internally now
     }
 
     return {
-      loadedChunks: newlyLoaded,
-      unloadedChunks: newlyUnloaded.map(id => this.chunkManager.getAllChunks().find(c => c.id === id)!).filter(Boolean),
+      loadedChunks: [],
+      unloadedChunks: [],
       tilemapsLoaded,
       tilemapsUnloaded,
     };
   }
 
-  getChunkManager(): WorldChunkManager {
-    return this.chunkManager;
-  }
-
   getLoadedChunks(): WorldChunk[] {
-    return this.chunkManager.getAllChunks().filter(c => c.isLoaded);
+    return [];
   }
 }
